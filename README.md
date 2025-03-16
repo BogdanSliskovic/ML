@@ -1,13 +1,17 @@
 U ovom repozitorijumu ima 4 jupyter fajla:
 
-1)Iris.ipynb 
+1)Iris.ipynb
 
-Baza je iz sklearn.datasets, ima 150 podataka o tri vrste cveća: setosa, versicolor i virginica. 
+Baza je iz sklearn.datasets, ima 150 podataka o tri vrste cveća: setosa, versicolor i virginica.
 Koristio sam dužinu i širinu latice kao promenljive za predviđanje vrste cveća. Podacima nije bilo potrebno nikakvo dodatno predprocesiranje.
 Ovu bazu sam izabrao jer su primeri jasno razdvojivi i hteo sam da vizualizujem kako algoritmi kao sto su SVC, random forest i logisticka regresija donose odluke u zavisnosti od razlicitih vrednosti hiperparametara.
 Cilj ovog projekta je bio da shvatim kako 'fino podesiti' model, kao i prepoznam kada overfituje ili underfituje
 
 2) Kredit.ipynb
 
-Baza je takodje iz sklearn.datasets, ima 17000 podataka o kreditnoj sposobnosti klijenata (good / bad). Za predprocesiranje logit modela koristio standardizaciju i vestacko enkodiranje gde se prva kolona svake kategorije izbacuje zbog multikolinearnosti, za SVC standardizaciju i vestacko enkodiranje (bez izbacivanja prve kolone), dok za random forest nisam predprocesuirao podatke.
-Fokusirao sam se prvenstveno na vizualizaciju toga kako izgleda f1 statistika na trening i test setu uporedno, kada se menja velicina trening skupa. Koristio sam GridSearchCV da pronadjem najbolji model iz sva tri algoritma i sacuvao ga kao .pkl fajl, kao ciljanu metriku sam postavio scoring='recall', kako bih minimizirao 'lazno pozitivne' klijente. Na test setu se najbolje pokazao RF, pa sam odlucio da udjem u dublju analizu kako RF donosi odluke. Vizualizovao sam intervale vaznosti promenljivih, shap vrednosti, kao i roc auc statistiku kada se menja parametar maksimalne dubine drveta
+Baza je takodje iz sklearn.datasets, ima 17000 podataka o kreditnoj sposobnosti klijenata (good / bad). Za predprocesiranje logit modela koristio sam standardizaciju i vestacko enkodiranje gde se prva kolona svake kategorije izbacuje zbog multikolinearnosti, za SVC standardizaciju i vestacko enkodiranje (bez izbacivanja prve kolone), dok za random forest nisam predprocesuirao podatke.
+Fokusirao sam se na vizualizaciju f1 statistike na trening i test setu uporedno, kada se menja velicina trening skupa i hiperparametri, kako bih jasnije uocio kako izgleda overfitting  i underfitting i kako da podesim hiperparametre da to izbegnem. Koristio sam GridSearchCV kako bih pronašao optimalne hiperparametre za sva tri algoritma i sacuvao ga u .pkl formatu. Kao ciljanu metriku sam postavio scoring='recall', kako bih minimizovao lazno pozitivne predikcije. Na test setu se najbolje pokazao RF, pa sam se detaljnije posvetio analizi njegovog ponašanja. Vizualizovao sam intervale vaznosti promenljivih (feature importance), SHAP vrednosti, kao i ROC AUC pri razlicitim vrednostima maksimalne dubine drveta. Za kraj, izdvojio sam podatke iz test skupa gde RF model pravi greške
+
+3) Titanik.ipynb
+
+Baza je iz sns.load_dataset, ima podatke o 900 putnika na titaniku sa njihovim karakteristikam (starost, pol, klasa, broj članova porodice, tarifa karte, luka ukrcavanja), i ciljanu promenjivom da li su preziveli ili nisu. Prvo sam uklonio par kolona koje ne dodaju dodatne informacije i proverio deskriptivne statistike, gde sam video da varijabla koja oznacava palubu na koju su se putnici ukrcali ima samo 200 non - null vrednosti. Odlucio sam da nedostajuce vrednosti imputiram sa KNNimputer - om. Nakon toga napravio sam nove promenjive koje obelezavaju velicinu porodice i tacnije mesto ukrcavanja (klasa i paluba). Kada sam delio podatke na train i test, obratio sam paznju na stratifikaciju uzorka (zbog nebalansiranosti klasa - samo 38 posto ljudi je prezivelo)
