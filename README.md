@@ -24,4 +24,7 @@ Nakon toga hteo sam da vidim da li klasterizacija podataka moze pomoci modelu. N
 Kako KMeans ocigledno ne pomaze probao sam da odradim klasterizaciju sa DBSCAN - om (ne treba predefinisan broj klastera i robustniji je od KMeans na klastere razlicitih oblika). Da bih dobio ideju koja vrednost epsilona je prikladna ovom skupu podataka pomocu KNN algoritma vizualizovao sam udaljenost do pete najblize tacke, primetio sam da ima dva skoka za 1 < epsilon < 2, dosao sam do zakljucka da je vrednost 1.65 zadovoljavajuca za epsilon (otkriva podklastere i nema previse netipicnih vrednosti), ima 6 klastera i 69 netipicnih vrednosti. Dodao sam kolonu koja obelezava kom klasteru pripada svaki putnik u trening setu i ponovo trenirao svc model. 
 
 
-4) MNIST.ipynb
+4) LogisticRegressionPandasNumpy
+Koristio sam MNIST bazu koja ima 70000 slika rukom napisanih brojeva od 0 do 9, slike imaju 784 piksel, pikseli su na skali 0 - 255 koja oznacava boju piksela.
+Odlucio sam da napravim model koji ce predvideti da li je cifra 5 ili nije. Skalirao sam ulazne promenljive tako da budu na skali 0 - 1 i vektor parametara sam nasumicno postavio iz U(-0.5,0.5), kao aktivirajucu funkciju koristio sam logit funkciju i kao funkciju gubitka koristio sam binarnu funkciju unakrsne entropije bez regularizacije.
+Model sam trenirao algoritmom grupnog gradijentnog spusta (batch gradient descent) sa 3000 iteracija. Tacnost na trening i dev skupu su 0.94842,0.9496, dok model treniran na istim podacima pomocu biblioteke sklearn na 1000 iteracija i sa penality = None ima 0.9782 i 0.94842 na trening i dev skupu.
