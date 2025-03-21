@@ -7,7 +7,7 @@
 import os
 
 # Putanja do Git repozitorijuma
-repo_path = r"C:\Users\bogdan.sliskovic\Desktop\bole\ML"
+repo_path = r'C:\Users\Jelena\Desktop\Freestyle\GitHub\ML'
 
 # Prelazak u repozitorijum
 os.chdir(repo_path)
@@ -24,9 +24,9 @@ print("\n🔍 *** DETALJNE PROMENE ***\n")
 os.system("git diff --stat")  # Prikazuje listu promenjenih fajlova
 
 # Pita korisnika da li želi da pull-uje izmene
-odgovor = input("\n❓ Želiš li da pull-uješ najnovije promene? (da/ne): ").strip().lower()
+odgovor = input("\n❓ Želiš li da pull-uješ najnovije promene? (y/n): ").strip().lower()
 
-if odgovor in ["da", "d", "yes", "y"]:
+if odgovor == 'y':
     print("\n📥 Povlačim najnovije izmene sa Gita...\n")
     os.system("git pull")
 else:
