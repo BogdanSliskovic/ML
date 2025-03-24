@@ -11,4 +11,4 @@ today = date.today()
 x = input('Kako zelis da nazoves commit?')
 os.system(f'git commit -m"{today} {x}"')
 
-os.system("git pull")
+os.system("git push")
