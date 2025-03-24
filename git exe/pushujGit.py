@@ -9,6 +9,6 @@ os.system("git add .")
 today = date.today()
 
 x = input('Kako zelis da nazoves commit?')
-os.system(f'git commit -m"{today} {x}"')
+os.system(f'git commit -m"{today.day}/{today.month} {x}"')
 
 os.system("git push")
