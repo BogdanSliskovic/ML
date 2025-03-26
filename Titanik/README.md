@@ -1,4 +1,4 @@
-## 🛳️ Titanic Survival Prediction with Advanced Modeling & Clustering
+## Titanic Survival Prediction with Advanced Modeling & Clustering
 
 This project explores the Titanic dataset (sns.load_dataset("titanic")) containing around 900 passenger records, including features like age, gender, class, family size, fare, and port of embarkation, with the target variable indicating survival.
 
@@ -10,7 +10,7 @@ SVC emerged as the best-performing model. I then used PCA to reduce dimensionali
 
 As an exploratory extension, I experimented with **unsupervised clustering**. Using a pipeline, I added `KMeans` cluster labels (with optimized `n_clusters`) as additional features for the SVC model. However, the added clusters did not improve test performance, possibly due to overfitting. I then tried **DBSCAN**, a density-based clustering algorithm, tuning the epsilon parameter using k-distance plots. With epsilon = 1.65, DBSCAN identified 6 clusters and 69 outliers, which were incorporated into the training data for further modeling.
 
-### 🔍 Key Concepts:
+### Key Concepts:
 - Feature engineering (deck-class combo, family size)
 - Missing data imputation via KNN
 - Stratified sampling for imbalanced targets
