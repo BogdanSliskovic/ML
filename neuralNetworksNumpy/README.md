@@ -1,26 +1,31 @@
-## Neural Network Foundations using NumPy and Custom Logistic Regression
+## Neural Network Playground with Custom Logit Class (NumPy-only)
 
-In this project, I use a custom `Logit` class (previously implemented from scratch using NumPy) as the foundation for building a simple neural network architecture.
+This project explores the basics of building a neural network manually using NumPy, with a focus on understanding forward propagation and softmax-based classification — without relying on high-level libraries like TensorFlow or PyTorch.
 
-The goal is to explore how data flows through a neural network at a low level, without relying on deep learning libraries like TensorFlow or PyTorch. This includes manual implementation of forward propagation, activation functions, backpropagation and training.
+At the core of the project is a custom `Logit` class, originally designed for logistic regression, which has been extended to support softmax activation for multiclass problems. The class also includes features like L1/L2 regularization, early stopping, and weight tracking.
 
-The model is trained on the MNIST dataset (handwritten digit classification). Features are normalized and one-hot encoded targets are used for multiclass prediction.
+### Dataset
+The model is trained on the full MNIST dataset (70,000 handwritten digits), using the following setup:
+- `fetch_openml("mnist_784")` for data loading
+- Manual normalization (pixel values / 255)
+- One-hot encoding of labels
+- Data split: 50,000 train / 10,000 dev / 10,000 test
 
-### Structure
-- The first hidden layer is created manually using NumPy and applies a sigmoid activation.
-- The `Logit` class is then used as the output layer with softmax activation.
-- Different weight initializations and learning rates are tested.
-- Forward pass is implemented manually.
-- Model evaluation is based on accuracy on train/dev/test sets.
+### Architecture
+- The neural net currently has a single layer (input → output)
+- Weight matrix is initialized manually: `w = np.random.rand(...) - 0.5`
+- Forward pass is implemented using softmax: `Logit.softmax(x @ w)`
+- Loss: cross-entropy
+- Evaluation: classification accuracy on train/dev/test sets
 
-### Key Concepts:
-- Forward propagation using matrix operations
-- Custom activation flow through multiple layers
-- Using a hand-built logistic regression class as the final layer
-- Preparing structure for gradient-based training
-- Applied on MNIST dataset with multiclass targets
+### Highlights
+- All logic implemented in NumPy
+- Full forward pass with softmax for multiclass classification
+- Custom logistic regression class reused and extended
+- Foundation laid for implementing backpropagation later
+- Clean manual pipeline: feature prep, target encoding, training, evaluation
 
 ### Next Steps
-The current version performs forward propagation only. Backpropagation and full training through multiple layers will be implemented next.
-
-
+- Implement backpropagation manually
+- Add support for hidden layers and different activations
+- Track loss and accuracy over iterations
