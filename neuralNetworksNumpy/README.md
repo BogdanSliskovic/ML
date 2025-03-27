@@ -1,4 +1,4 @@
-## Neural Network Playground with Custom Logit Class (NumPy-only)
+## Neural Network from Scratch using NumPy with Custom Logit Class
 
 This project explores the basics of building a neural network manually using NumPy, with a focus on understanding forward propagation and softmax-based classification — without relying on high-level libraries like TensorFlow or PyTorch.
 
