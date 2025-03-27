@@ -7,7 +7,7 @@ This repository is organized into several subfolders, each containing a self-con
 
 ## Contents
 
-### [Logistic Regression (NumPy)](./LogisticRegression_Numpy)
+### [Logistic Regression (NumPy)](./logisticRegression_Numpy)
 Custom `Logit` class implemented in pure NumPy, supporting both binary and multiclass classification. Features include L1/L2 regularization, batch gradient descent with learning rate decay, early stopping, and model rollback.  
 Applied to the MNIST dataset, achieving competitive results versus Scikit-learn baselines. Also includes custom grid search and model saving with `joblib`.
 

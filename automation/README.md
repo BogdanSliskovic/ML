@@ -30,7 +30,7 @@ Automates the routine of checking Git repository status and optionally pulling c
 **Customization Tip:**  
 Update `repo_path` to point to your Git repository location.
 
----
+--- 
 
 ### 3. `pushujGit.py` – Add, Commit, and Push in One Go
 
