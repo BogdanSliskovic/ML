@@ -12,8 +12,7 @@ Custom `Logit` class implemented in pure NumPy, supporting both binary and multi
 Applied to the MNIST dataset, achieving competitive results versus Scikit-learn baselines. Also includes custom grid search and model saving with `joblib`.
 
 ### [Neural Networks (NumPy)](./neuralNetworks_Numpy) `in progress`
-Manual implementation of a neural network using only NumPy. Built on top of the `Logit` class to support forward propagation and softmax-based classification. Uses MNIST, with manual data preprocessing, one-hot encoding, and full forward pass logic.  
-Lays the foundation for backpropagation and hidden layer support in future iterations.
+Manual implementation of a flexible multilayer neural network using only NumPy. Built upon the enhanced `Logit` class to support forward propagation, sigmoid and softmax-based classification, and numerical gradient computations. The project utilizes the MNIST dataset, featuring manual data preprocessing, normalization, and one-hot encoding.
 
 ### [Fashion MNIST (Keras)](./fashionMNIST_keras) `in progress`
 Image classification using fully connected neural networks built with TensorFlow and Keras. Applied on the Fashion MNIST dataset with exploration of activation functions, dropout regularization, and tuning hyperparameters.  
