@@ -1,0 +1,126 @@
+Movie Recommendation System (Two-Tower Architecture)
+
+A content-based recommendation system that predicts user ratings for movies using both user and movie features. This project leverages a two-tower neural network: one tower encodes user preferences (based on genre ratings) and the other encodes movie attributes (genres, release year, average rating). The model takes the dot product of these towers’ outputs to produce a predicted rating. The goal is to learn from historical data which movies a user is likely to rate highly, and recommend accordingly.
+Technologies Used
+
+    Polars for high-performance data manipulation of large CSV files (MovieLens dataset). Polars is used to preprocess ratings and movies data, compute genre features, and aggregate statistics.
+
+    TensorFlow & Keras for building and training the deep learning model. The two-tower model is implemented using Keras’ functional API.
+
+    Airflow for orchestrating data pipelines in the simulated production workflow (MLOps). Airflow schedules daily data ingestion and model update tasks.
+
+    PostgreSQL as the database to store the bulk of the dataset and new incoming ratings. The remaining 25 million movie ratings (from the MovieLens dataset) are loaded into Postgres for incremental processing.
+
+Feature Preparation
+
+    User Features (User Tower Input): For each user, we compute the average rating per movie genre. This is done by grouping the user’s historical ratings by genre and taking the mean. The result is a feature vector where each element represents how much the user likes a specific genre (zero if the user has no ratings in that genre). These genre-wise averages serve as the input to the user tower.
+
+    Movie Features (Movie Tower Input): For each movie, we create features including a one-hot encoding of its genres, its release year (normalized), and the movie’s average rating across all users. The genres are split into binary flags (e.g., Action, Comedy, etc.). The release year is extracted from the movie title and scaled (using standard normalization). The average rating of the movie provides a popularity signal. Together, these form the input vector to the movie tower.
+
+Model Architecture and Training
+
+The recommendation model uses a two-tower neural network architecture with a dot product output:
+
+    User Tower: Takes the user feature vector (genre rating averages) as input. It passes through one or more dense layers with nonlinear activations (e.g. ReLU) to produce an embedded user representation.
+
+    Movie Tower: Takes the movie feature vector (one-hot genres, normalized year, average rating) as input. It likewise passes through dense layers to produce an embedded movie representation.
+
+    Dot-Product Prediction: The outputs of the two towers are combined using a dot product. This effectively measures the compatibility between the user and movie vectors, yielding a single scalar. That scalar is trained to match the actual user rating of the movie.
+
+The model was compiled with mean squared error (MSE) loss and trained using the Adam optimizer. Training was performed on approximately 5 million rating examples from the MovieLens 32M dataset. The data was split into training, validation, and test sets. During training, the network learns to align user genre-preference vectors with movie-genre vectors so that dot products approximate the ratings. Early stopping and learning rate adjustments can be applied, although the initial training used a fixed small learning rate suitable for convergence.
+Specific Project Details
+
+    Data Partition: A subset of the full dataset (~5M ratings) was used for initial training to validate the model. The remaining ~25M ratings are stored in the PostgreSQL database for later use.
+
+    Model Artifacts: The trained model is exported and saved in the TensorFlow .keras format. This format packages the model architecture and learned weights into a single file, which can be loaded later for inference or further training.
+
+    Intended Use: This project is primarily a demonstration of the recommendation approach and MLOps pipeline. It is not configured for direct execution by external users. The code assumes a local environment with the specified libraries and data. However, the README documents the system design in detail for transparency.
+
+Future Work: MLOps Pipeline and Monitoring
+
+To simulate a production environment and continuous learning, the following MLOps workflow is planned:
+
+    Data Ingestion: Load the remaining 25 million movie ratings into the PostgreSQL database. This database will act as the source of truth for user feedback data.
+
+    Daily Pipeline (Airflow): Each morning, an Airflow DAG will run to extract a batch of ~50,000 new ratings from the database (e.g. overnight user activity).
+
+    Feature Engineering: The extracted batch undergoes the same preprocessing steps as the training data: mapping users to their genre-preference features and movies to their one-hot genre vectors and normalized year/average rating. This ensures new data is in the correct format for the model.
+
+    Model Update: New data will be used to update the model in one of two ways:
+
+        Warm Update: Perform further training (“warm start”) on the new batch with a very low learning rate, so as not to disrupt already learned weights. This refines the model incrementally.
+
+        Periodic Retraining: Alternatively, accumulate daily batches and retrain the model from scratch on the expanded dataset periodically (e.g. weekly) to incorporate larger changes.
+
+    Performance Monitoring: Implement monitoring of the model’s accuracy (e.g. tracking MSE or MAE on a hold-out set) over time. Dashboards or alerts can be set up to detect data drift or degradation, indicating when retraining is needed.
+
+These steps form a continuous feedback loop: as new user ratings are collected each day, the model adapts over time. The Airflow-managed pipeline and Postgres storage simulate a production setup, preparing the system for real-world deployment and maintenance.
+
+
+🏛️ Data Architecture — Prava verzija
+
+Postoje tri baze, i evo tačno kako rade:
+1. Raw Database (raw_db) - 📂 Arhiva svih podataka (32 miliona redova)
+
+    Ova baza je glavni istorijski izvor svih podataka ikad.
+
+    NE menjaš je osim kad prebaciš novi batch:
+
+        Svakog jutra uzmeš 50k novih redova iz raw_db.
+
+        Prebaciš ih u sledeću bazu (data_lake_db).
+
+        Dropuješ te redove iz raw_db (npr. DELETE WHERE id IN (...)).
+
+    Ova baza nikada neće biti ceo source za trening direktno — koristiš samo delove.
+
+2. Data Lake Database (data_lake_db) - 🏝️ Cleaned Storage
+
+    Svakog jutra ubacuješ novih 50k redova ovde iz raw_db.
+
+    Samo čistiš osnovne stvari:
+
+        Formatiraš datume.
+
+        Brišeš duplikate, NaN vrednosti, invalidne podatke.
+
+    Ovde još uvek nisu inženjeringovani feature-i (čista forma).
+
+    Služi kao priprema za ozbiljnu obradu.
+
+    NIKADA ne brišeš ništa iz data_lake_db.
+
+3. Processed Database (processed_db) - 🧪 Feature Store
+
+    Iz data_lake_db praviš transformisane podatke:
+
+        Generišeš user feature vektore (npr. prosečna ocena po žanru).
+
+        Movie feature vektore (npr. one-hot žanrovi, normirana godina...).
+
+    Ovde čuvaš direktno inpute za model.
+
+    Ova baza je pripremljena za inference ili za batch retraining.
+
+🔥 Workflow dnevno (airflow DAG)
+Faza	Akcija	Izvor	Odredište
+1	Uzmi 50k novih redova	raw_db	data_lake_db
+2	Dropuj ubačene redove	raw_db	—
+3	Validiraj i očisti	data_lake_db	(već cleanano)
+4	Transformiši feature-e	data_lake_db	processed_db
+5	(Opcionalno) Fine-tune model sa novim podacima	processed_db	Model
+✨ Još par tačaka:
+
+    Za brisanje iz raw_db preporučujem da koristiš neki status flag umesto direktnog brisanja (processed=True), pa povremeno praviš VACUUM da fizički očistiš.
+
+    Za prebacivanje koristiš SQL COPY, INSERT INTO ... SELECT, ili ORM batchove.
+
+    Transformacije (feature engineering) možeš da spakuješ kao Airflow taskove.
+
+🚀 Prednosti ovako postavljenog sistema:
+
+✅ Ne premeštaš sve odjednom (štediš resurse).
+✅ Imaš tačno kontrolu šta je već prošlo kroz pipeline.
+✅ Data Lake uvek ima sve podatke koje si obradio.
+✅ Processed baza omogućava brzi retraining i brze inference.
+✅ Super realan MLOps flow!
