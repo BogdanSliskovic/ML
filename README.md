@@ -7,7 +7,7 @@ This repository is organized into several subfolders, each containing a self-con
 
 ## Contents
 
-### Movie Recommendation System (PostgreSQL + Keras)
+### [Movie Recommendation System](./film) (PostgreSQL + Keras)
 
 Scalable recommendation engine built with PostgreSQL and neural collaborative filtering. Data is sampled from `raw.ratings`, moved to `data_lake.ratings` for training, transformed and stored in `data_storage.ratings`, while predictions are saved in `predictions.ratings`.  
 Model takes user genre preferences and movie metadata to predict ratings. Future automation planned via Apache Airflow for daily predictions and weekly retraining.
