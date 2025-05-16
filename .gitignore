@@ -9,3 +9,6 @@ __pycache__/
 # Ignoriši modele i skalere
 *.keras
 *.pkl
+
+*.ideje
+film\ideje.txt
