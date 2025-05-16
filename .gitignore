@@ -1,0 +1,11 @@
+# Ignoriši VS Code podešavanja
+.vscode/
+*.code-workspace
+
+# Ignoriši Python cache fajlove
+__pycache__/
+*.pyc
+
+# Ignoriši modele i skalere
+*.keras
+*.pkl
