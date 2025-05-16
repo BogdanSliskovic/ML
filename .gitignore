@@ -10,5 +10,8 @@ __pycache__/
 *.keras
 *.pkl
 
-*.ideje
-film\ideje.txt
+*ideje.txt
+
+#Veliki fajlovi
+venv/
+ml-32m
