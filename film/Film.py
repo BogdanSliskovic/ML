@@ -1,15 +1,16 @@
 import polars as pl
 from sqlalchemy import create_engine
 import os
-
-from sklearn.preprocessing import StandardScaler, MinMaxScaler
+from sqlalchemy.sql import text
 from sklearn.linear_model import LinearRegression
-from sklearn.metrics import mean_absolute_error, mean_squared_error
-from sklearn.model_selection import train_test_split
+from sklearn.metrics import mean_squared_error, mean_absolute_error
+
+
 import numpy as np
 np.set_printoptions(suppress=True)
 import joblib
 
+import matplotlib.pyplot as plt
 
 import tensorflow as tf
 from tensorflow import keras
@@ -20,28 +21,28 @@ import time
 engine = create_engine(f"postgresql+psycopg2://postgres:{os.getenv('POSTGRES_PASSWORD')}@localhost:5432/movie_recommendation")
 conn = engine.connect()
 
-ratings = pl.read_database(query='SELECT * FROM raw.ratings ORDER BY RANDOM() LIMIT 2500000', connection=conn)
-movies = pl.read_database(query='SELECT * FROM raw.movies', connection=conn)
-conn.close()
-
-conn = engine.connect()
-ratings.write_database(
-    table_name="data_lake.ratings",
-    connection=conn,
-    if_table_exists="replace",
-)
-
-print("Uspesno upisani redovi")
-conn.close()
-
-# start_time = time.time()
-# engine = create_engine(f"postgresql+psycopg2://postgres:{os.getenv('POSTGRES_PASSWORD')}@localhost:5432/movie_recommendation")
-# conn = engine.connect()
-# ratings = pl.read_database(query='SELECT * FROM data_lake.ratings', connection=conn)
+# ratings = pl.read_database(query='SELECT * FROM raw.ratings ORDER BY RANDOM() LIMIT 2500000', connection=conn)
 # movies = pl.read_database(query='SELECT * FROM raw.movies', connection=conn)
-# print(f"Execution time: {time.time() - start_time:.4f} seconds")
-# ratings.describe()[['statistic', 'rating']]
-# movies
+# conn.close()
+
+# conn = engine.connect()
+# ratings.write_database(
+#     table_name="data_lake.ratings",
+#     connection=conn,
+#     if_table_exists="replace",
+# )
+
+# print("Uspesno upisani redovi")
+# conn.close()
+
+start_time = time.time()
+engine = create_engine(f"postgresql+psycopg2://postgres:{os.getenv('POSTGRES_PASSWORD')}@localhost:5432/movie_recommendation")
+conn = engine.connect()
+ratings = pl.read_database(query='SELECT * FROM data_lake.ratings', connection=conn)
+movies = pl.read_database(query='SELECT * FROM raw.movies', connection=conn)
+print(f"Execution time: {time.time() - start_time:.4f} seconds")
+ratings.describe()[['statistic', 'rating']]
+movies
 
 def prep_pipeline(user, movies):
     #PROSECAN BROJ OCENA PO FILMU
@@ -83,23 +84,27 @@ def prep_pipeline(user, movies):
 user, movies, df = prep_pipeline(ratings, movies)
 
 def NN_prep(df):
-    # #U NUMPY I SKALIRANJE
-    
-    y = df.select(pl.col('rating')).to_numpy()
-    X_user = df.select(user.select(pl.exclude('userid')).columns)
-    X_movie = df.select(movies.select(pl.exclude(['movieid','title'])).columns + ['#ratings_film'])
-    SS_movie = StandardScaler()
-    SS_user = StandardScaler()
-    SS_target = MinMaxScaler((-1,1))
-    movie_num = SS_movie.fit_transform(X_movie['#ratings_film', 'year', 'avg_rating'])
-    movie_cat = X_movie.select(pl.all().exclude(['#ratings_film', 'year', 'avg_rating'])).to_numpy()
-    X_movie_numpy = np.column_stack([movie_num,movie_cat])
-    X_user_numpy = SS_user.fit_transform(X_user)
-    y = SS_target.fit_transform(y)
-    return X_user_numpy, X_movie_numpy, y, SS_movie, SS_user, SS_target
-
-X_user_numpy, X_movie_numpy, y, SS_movie, SS_user, SS_target = NN_prep(df)
-
+    # Priprema podataka bez sklearn i numpy
+    y = tf.convert_to_tensor(df.select(pl.col('rating')).to_series().to_list(), dtype=tf.float32)
+    X_user = tf.convert_to_tensor(df.select(user.select(pl.exclude('userid')).columns).to_numpy(), dtype=tf.float32)
+    X_movie_df = df.select(movies.select(pl.exclude(['movieid','title'])).columns + ['#ratings_film'])
+    movie_num = tf.convert_to_tensor(X_movie_df.select(['#ratings_film', 'year', 'avg_rating']).to_numpy(), dtype=tf.float32)
+    movie_cat = tf.convert_to_tensor(X_movie_df.select(pl.all().exclude(['#ratings_film', 'year', 'avg_rating'])).to_numpy(), dtype=tf.float32)
+    # Skaliranje (standardizacija) user i movie numeričkih karakteristika
+    user_mean = tf.reduce_mean(X_user, axis=0)
+    user_std = tf.math.reduce_std(X_user, axis=0)
+    X_user = (X_user - user_mean) / (user_std + 1e-8)
+    movie_mean = tf.reduce_mean(movie_num, axis=0)
+    movie_std = tf.math.reduce_std(movie_num, axis=0)
+    movie_num_scaled = (movie_num - movie_mean) / (movie_std + 1e-8)
+    X_movie = tf.concat([movie_num_scaled, movie_cat], axis=1)
+    # Target skaliranje na [-1, 1]
+    y_min = tf.reduce_min(y)
+    y_max = tf.reduce_max(y)
+    y_scaled = 2 * (y - y_min) / (y_max - y_min) - 1
+    return X_user, X_movie, y_scaled
+X_user_numpy, X_movie_numpy, y = NN_prep(df)
+tf.reduce_max(y), tf.reduce_min(y) 
 X_user_numpy.shape, X_movie_numpy.shape, y.shape, SS_movie.feature_names_in_, SS_user.feature_names_in_,SS_target.feature_range
 
 ##Za linearnu regresiju
@@ -115,8 +120,7 @@ num_user_features = X_user_numpy.shape[1]
 num_item_features = X_movie_numpy.shape[1]
 num_outputs = 20
 
-X_user_train, X_user_dev, X_movie_train, X_movie_dev, y_train, y_dev = train_test_split(X_user_numpy, X_movie_numpy,
-                                                                                        y, test_size=0.15, random_state=42)
+X_user_train, X_user_dev, X_movie_train, X_movie_dev, y_train, y_dev = train_test_split(X_user_numpy, X_movie_numpy, y, test_size=0.15, random_state=42)
 X_user_train.shape, X_user_dev.shape, X_movie_train.shape, X_movie_dev.shape, y_train.shape, y_dev.shape
 X_user_train[:5], X_movie_train[:5], y_train[:5]
 
@@ -124,52 +128,119 @@ num_user_features = X_user_numpy.shape[1]
 num_item_features = X_movie_numpy.shape[1]
 num_outputs = 64
 
-# ---------------- USER MODEL ----------------
-user_input = keras.Input(shape=(num_user_features,), name='user_input')
-x_user = layers.Dense(128, activation='tanh', kernel_initializer='glorot_uniform', kernel_regularizer= keras.regularizers.l2(0.001))(user_input)
-x_user = layers.Dense(num_outputs, activation='tanh', kernel_initializer='glorot_uniform')(x_user)
-user_embedding = layers.Lambda(lambda x: tf.nn.l2_normalize(x, axis=1))(x_user)
+class ColaborativeFiltering:
+    def __init__(self, num_user_features, num_item_features, embedding=64, learning_rate=0.001):
+        self.num_user_features = num_user_features
+        self.num_item_features = num_item_features
+        self.embedding = embedding
+        self.learning_rate = learning_rate
+        self.model = self._build_model()
 
-# ---------------- ITEM MODEL ----------------
-item_input = keras.Input(shape=(num_item_features,), name='item_input')
-x_item = layers.Dense(128, activation='tanh', kernel_initializer='glorot_uniform')(item_input)
-x_item = layers.Dense(num_outputs, activation='tanh', kernel_initializer='glorot_uniform')(x_item)
-item_embedding = layers.Lambda(lambda x: tf.nn.l2_normalize(x, axis=1))(x_item)
+    def _build_model(self):
+        user_input = keras.Input(shape=(self.num_user_features,), name='user_input')
+        x_user = layers.Dense(128, activation='tanh', kernel_initializer='glorot_uniform', kernel_regularizer=keras.regularizers.l2(0.001))(user_input)
+        x_user = layers.Dense(self.embedding, activation='tanh', kernel_initializer='glorot_uniform')(x_user)
+        user_embedding = layers.Lambda(lambda x: tf.nn.l2_normalize(x, axis=1))(x_user)
 
-# ---------------- COSINE SIMILARITY ----------------
-cos_sim = layers.Dot(axes=1, name='cosine_similarity')([user_embedding, item_embedding])
-# rezultat je u [-1, 1]
+        item_input = keras.Input(shape=(self.num_item_features,), name='item_input')
+        x_item = layers.Dense(128, activation='tanh', kernel_initializer='glorot_uniform')(item_input)
+        x_item = layers.Dense(self.embedding, activation='tanh', kernel_initializer='glorot_uniform')(x_item)
+        item_embedding = layers.Lambda(lambda x: tf.nn.l2_normalize(x, axis=1))(x_item)
 
-# ---------------- FINAL MODEL ----------------
-model_tanh_l2 = keras.Model(inputs=[user_input, item_input], outputs=cos_sim)
+        cos_sim = layers.Dot(axes=1, name='cosine_similarity')([user_embedding, item_embedding])
+        model = keras.Model(inputs=[user_input, item_input], outputs=cos_sim)
+        model.compile(optimizer=keras.optimizers.Nadam(learning_rate=self.learning_rate), loss='mse', metrics=['mae', 'mse'])
+        return model
 
-# Kompajliraj model
-model_tanh_l2.compile(optimizer= keras.optimizers.Nadam(learning_rate= 0.001), loss='mse', metrics=['mae', 'mse'])
+    def fit(self, X_user_train, X_item_train, y_train, X_user_val, X_item_val, y_val, epochs=25, batch_size=512, callbacks=None):
+        return self.model.fit(
+            x=[X_user_train, X_item_train], y=y_train,
+            validation_data=([X_user_val, X_item_val], y_val),
+            callbacks=callbacks,
+            epochs=epochs, batch_size=batch_size
+        )
 
-# Prikaži arhitekturu
-model_tanh_l2.summary()
-##12.38
-early_stop = EarlyStopping(monitor='val_loss', patience=4, restore_best_weights=True,)
+    def predict(self, X_user, X_item):
+        return self.model.predict([X_user, X_item])
 
-reduce_lr = ReduceLROnPlateau(monitor='val_loss', factor=0.3, patience=2, min_lr=1e-6, verbose=1)
+    def save(self, path):
+        self.model.save(path)
 
-history_tanh_l2 = model_tanh_l2.fit(x=[X_user_train, X_movie_train],y=y_train, callbacks=[early_stop, reduce_lr],
-    validation_data=([X_user_dev, X_movie_dev], y_dev),epochs=25, batch_size=512)
+    def summary(self):
+        self.model.summary()
 
+    def recommend(self, user_vec, movie_matrix, user_seen_movie_indices, k=10, movie_titles=None):
+        # Prosiri user_vec na broj filmova
+        user_vecs = np.repeat(user_vec.reshape(1, -1), movie_matrix.shape[0], axis=0)
+        preds = self.predict(user_vecs, movie_matrix).flatten()
+        preds[list(user_seen_movie_indices)] = -np.inf
+        top_k_idx = preds.argsort()[-k:][::-1]
+        if movie_titles is not None:
+            return [(movie_titles[i], preds[i]) for i in top_k_idx]
+        else:
+            return list(zip(top_k_idx, preds[top_k_idx]))
 
-help(model_tanh_l2.fit)
+    def get_user_seen_movie_indices(self, user_id, ratings, movies):
+        # Pronađi movieid koje je user gledao
+        gledani_movieid = set(ratings.filter(pl.col('userid') == user_id)['movieid'].to_list())
+        # Mapiraj movieid na indekse u X_movie_numpy
+        movieid_to_idx = {movie_id: idx for idx, movie_id in enumerate(movies['movieid'].to_list())}
+        return {movieid_to_idx[movie_id] for movie_id in gledani_movieid if movie_id in movieid_to_idx}
 
-history_tanh_l2.history.keys()
-import matplotlib.pyplot as plt
+# Primer korišćenja klase:
+model = ColaborativeFiltering(num_user_features, num_item_features, embedding=64, learning_rate=0.001)
+model.summary()
+callbacks = [EarlyStopping(monitor='val_loss', patience=4, restore_best_weights=True),
+             ReduceLROnPlateau(monitor='val_loss', factor=0.3, patience=2, min_lr=1e-6, verbose=1)]
+history = model.fit(X_user_train, X_movie_train, y_train, X_user_dev, X_movie_dev, y_dev, epochs=25, batch_size=258, callbacks=callbacks)
+model.save('model.keras')
+y_pred = model.predict(X_user_dev, X_movie_dev)
 
+# Primer: preporuke za jednog usera
+user_idx = 0
+user_id = df['userid'][user_idx] if 'userid' in df.columns else user_idx
+user_seen_movie_indices = model.get_user_seen_movie_indices(user_id, ratings, movies)
+user_vec = X_user_dev[user_idx]
+k = 10
+movie_titles = None  # ili lista naslova
+preporuke = model.recommend(user_vec, X_movie_numpy, user_seen_movie_indices, k=k, movie_titles=movie_titles)
+print('Preporuke za usera', user_idx, ':', preporuke)
 
-model_tanh_l2.save('model_tanh_l2.keras')
 joblib.dump(SS_movie, 'SS_movie.pkl')
 joblib.dump(SS_user, 'SS_user.pkl') 
 joblib.dump(SS_target, 'SS_target.pkl')
-joblib.dump(history_tanh_l2, 'history_tanh_l2.pkl')
+joblib.dump(history, 'history.pkl')
 
-#model_tanh_l2 = keras.models.load_model('model_tanh_l2.h5', custom_objects={'cosine_similarity': tf.keras.backend.function})
-#history_tanh_l2 = joblib.load('history_tanh_l2.pkl')
-plt.plot(history_tanh_l2.history['loss'], label='loss')
-plt.plot(history_tanh_l2.history['val_loss'], label='val_loss')
+plt.plot(history.history['loss'], label='loss')
+plt.plot(history.history['val_loss'], label='val_loss')
+def batch_generator(batch_size=4096):
+    offset = 0
+    while True:
+        query = f"SELECT * FROM raw.ratings LIMIT {batch_size} OFFSET {offset}"
+        batch = pl.read_database(query=query, connection=conn)
+        if batch.height == 0:
+            break
+        # Pripremi batch podatke (pretpostavlja se da su movies i user_feature globalni ili dostupni)
+        # Ako treba, koristi prep_pipeline za feature engineering
+        # Ovde koristiš istu logiku kao u NN_prep, ali za batch
+        # Ako treba, možeš unapred izračunati mean/std i proslediti ih
+        X_user, X_movie, y = NN_prep(batch)
+        yield (X_user, X_movie), y
+        offset += batch_size
+
+
+dataset = tf.data.Dataset.from_generator(
+    lambda: batch_generator(batch_size=4096),
+    output_signature=(
+        (tf.TensorSpec(shape=(None, X_user_numpy.shape[1]), dtype=tf.float32),
+         tf.TensorSpec(shape=(None, X_movie_numpy.shape[1]), dtype=tf.float32)),
+        tf.TensorSpec(shape=(None,), dtype=tf.float32)
+    )
+)
+dataset.prefetch(tf.data.AUTOTUNE)
+# Sada možeš trenirdaati model sa:
+# model.fit(dataset, epochs=10, steps_per_epoch=broj_redova // batch_size)
+
+conn.execute("SELECT COUNT(*) FROM data_lake.ratings")
+conn.execute(text("SELECT COUNT(*) FROM raw.ratings")).scalar()
+conn.execute(text("SELECT COUNT(*) FROM data_lake.ratings")).scalar()
