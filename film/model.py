@@ -1,3 +1,9 @@
+import numpy as np
+import tensorflow as tf
+from keras import layers, Input, regularizers, Model, optimizers
+from tensorflow import keras
+import polars as pl
+
 class ColaborativeFiltering:
     def __init__(self, num_user_features, num_item_features, embedding=64, learning_rate=0.001):
         self.num_user_features = num_user_features
@@ -7,19 +13,19 @@ class ColaborativeFiltering:
         self.model = self._build_model()
 
     def _build_model(self):
-        user_input = keras.Input(shape=(self.num_user_features,), name='user_input')
-        x_user = layers.Dense(128, activation='tanh', kernel_initializer='glorot_uniform', kernel_regularizer=keras.regularizers.l2(0.001))(user_input)
+        user_input = Input(shape=(self.num_user_features,), name='user_input')
+        x_user = layers.Dense(128, activation='tanh', kernel_initializer='glorot_uniform', kernel_regularizer=regularizers.l2(0.001))(user_input)
         x_user = layers.Dense(self.embedding, activation='tanh', kernel_initializer='glorot_uniform')(x_user)
-        user_embedding = layers.Lambda(lambda x: tf.nn.l2_normalize(x, axis=1))(x_user)
+        user_embedding = layers.Lambda(lambda x: tf.nn.l2_normalize(x, axis=1), output_shape=(self.embedding,))(x_user)
 
-        item_input = keras.Input(shape=(self.num_item_features,), name='item_input')
+        item_input = Input(shape=(self.num_item_features,), name='item_input')
         x_item = layers.Dense(128, activation='tanh', kernel_initializer='glorot_uniform')(item_input)
         x_item = layers.Dense(self.embedding, activation='tanh', kernel_initializer='glorot_uniform')(x_item)
-        item_embedding = layers.Lambda(lambda x: tf.nn.l2_normalize(x, axis=1))(x_item)
+        item_embedding = layers.Lambda(lambda x: tf.nn.l2_normalize(x, axis=1), output_shape=(self.embedding,))(x_item)
 
         cos_sim = layers.Dot(axes=1, name='cosine_similarity')([user_embedding, item_embedding])
-        model = keras.Model(inputs=[user_input, item_input], outputs=cos_sim)
-        model.compile(optimizer=keras.optimizers.Nadam(learning_rate=self.learning_rate), loss='mse', metrics=['mae', 'mse'])
+        model = Model(inputs=[user_input, item_input], outputs=cos_sim)
+        model.compile(optimizer=optimizers.Nadam(learning_rate=self.learning_rate), loss='mse', metrics=['mae', 'mse'])
         return model
 
     def fit(self, X_user_train, X_item_train, y_train, X_user_val, X_item_val, y_val, epochs=25, batch_size=512, callbacks=None):

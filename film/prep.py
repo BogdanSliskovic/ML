@@ -64,16 +64,45 @@ def NN_prep(df, user, movies):
     # Skaliranje (standardizacija) user i movie numeričkih karakteristika
     user_mean = tf.reduce_mean(X_user, axis=0)
     user_std = tf.math.reduce_std(X_user, axis=0)
-    X_user = (X_user - user_mean) / (user_std + 1e-8)
+    X_user_scaled = (X_user - user_mean) / (user_std + 1e-8)
     movie_mean = tf.reduce_mean(movie_num, axis=0)
     movie_std = tf.math.reduce_std(movie_num, axis=0)
     movie_num_scaled = (movie_num - movie_mean) / (movie_std + 1e-8)
-    X_movie = tf.concat([movie_num_scaled, movie_cat], axis=1)
+    X_movie_scaled = tf.concat([movie_num_scaled, movie_cat], axis=1)
     # Target skaliranje na [-1, 1]
     y_min = tf.reduce_min(y)
     y_max = tf.reduce_max(y)
     y_scaled = 2 * (y - y_min) / (y_max - y_min) - 1
-    return X_user, X_movie, y_scaled
+
+    # Vrati i transformatore za kasniju upotrebu
+    scalers = {"user_mean": user_mean, "user_std": user_std, "movie_mean": movie_mean, "movie_std": movie_std, "y_min": y_min, "y_max": y_max}
+
+    return X_user_scaled, X_movie_scaled, y_scaled, scalers
+
+def inverse_transform_y(y_scaled, scalers):
+    """
+    Inverzna transformacija za y skaliran na [-1, 1].
+    """
+    y_min = scalers["y_min"]
+    y_max = scalers["y_max"]
+    y = (y_scaled + 1) * (y_max - y_min) / 2 + y_min
+    return y
+
+def inverse_transform_X_user(X_user_scaled, scalers):
+    """
+    Inverzna transformacija za X_user.
+    """
+    user_mean = scalers["user_mean"]
+    user_std = scalers["user_std"]
+    return X_user_scaled * (user_std + 1e-8) + user_mean
+
+def inverse_transform_X_movie_num(X_movie_num_scaled, scalers):
+    """
+    Inverzna transformacija za numeričke karakteristike filma.
+    """
+    movie_mean = scalers["movie_mean"]
+    movie_std = scalers["movie_std"]
+    return X_movie_num_scaled * (movie_std + 1e-8) + movie_mean
 
 def batch_generator(movies, batch_size=4096):
     engine = create_engine(f"postgresql+psycopg2://postgres:{os.getenv('POSTGRES_PASSWORD')}@localhost:5432/movie_recommendation")
