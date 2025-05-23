@@ -1,64 +1,89 @@
 import numpy as np
 import tensorflow as tf
-from keras import layers, Input, regularizers, Model, optimizers
-from tensorflow import keras
+from keras import layers, regularizers, optimizers
 import polars as pl
+from keras.saving import register_keras_serializable
 
-class ColaborativeFiltering:
-    def __init__(self, num_user_features, num_item_features, embedding=64, learning_rate=0.001):
+@register_keras_serializable()
+class ColaborativeFiltering(tf.keras.Model):
+    def __init__(self, num_user_features, num_movie_features, user_layers=[128, 64], movie_layers=[128, 64], embedding=32, learning_rate=0.001, user_reg = None, movie_reg = None, **kwargs):
+        super().__init__(**kwargs)
         self.num_user_features = num_user_features
-        self.num_item_features = num_item_features
+        self.num_movie_features = num_movie_features
         self.embedding = embedding
         self.learning_rate = learning_rate
-        self.model = self._build_model()
 
-    def _build_model(self):
-        user_input = Input(shape=(self.num_user_features,), name='user_input')
-        x_user = layers.Dense(128, activation='tanh', kernel_initializer='glorot_uniform', kernel_regularizer=regularizers.l2(0.001))(user_input)
-        x_user = layers.Dense(self.embedding, activation='tanh', kernel_initializer='glorot_uniform')(x_user)
-        user_embedding = layers.Lambda(lambda x: tf.nn.l2_normalize(x, axis=1), output_shape=(self.embedding,))(x_user)
+        # User branch
+        user_dense_layers = []
+        for i, units in enumerate(user_layers):
+            reg = user_reg[i] if user_reg is not None else None
+            user_dense_layers.append(layers.Dense(units, activation='tanh', kernel_initializer='glorot_uniform', kernel_regularizer=reg))
 
-        item_input = Input(shape=(self.num_item_features,), name='item_input')
-        x_item = layers.Dense(128, activation='tanh', kernel_initializer='glorot_uniform')(item_input)
-        x_item = layers.Dense(self.embedding, activation='tanh', kernel_initializer='glorot_uniform')(x_item)
-        item_embedding = layers.Lambda(lambda x: tf.nn.l2_normalize(x, axis=1), output_shape=(self.embedding,))(x_item)
+        user_dense_layers.append(layers.Dense(self.embedding, activation='tanh', kernel_initializer='glorot_uniform'))
+        self.user_net = tf.keras.Sequential(user_dense_layers)
 
-        cos_sim = layers.Dot(axes=1, name='cosine_similarity')([user_embedding, item_embedding])
-        model = Model(inputs=[user_input, item_input], outputs=cos_sim)
-        model.compile(optimizer=optimizers.Nadam(learning_rate=self.learning_rate), loss='mse', metrics=['mae', 'mse'])
-        return model
+        # movie branch
+        movie_dense_layers = []
+        for units in movie_layers:
+            movie_dense_layers.append(layers.Dense(units, activation='tanh', kernel_initializer='glorot_uniform'))
+        movie_dense_layers.append(layers.Dense(self.embedding, activation='tanh', kernel_initializer='glorot_uniform'))
+        self.movie_net = tf.keras.Sequential(movie_dense_layers)
 
-    def fit(self, X_user_train, X_item_train, y_train, X_user_val, X_item_val, y_val, epochs=25, batch_size=512, callbacks=None):
-        return self.model.fit(
-            x=[X_user_train, X_item_train], y=y_train,
-            validation_data=([X_user_val, X_item_val], y_val),
-            callbacks=callbacks,
-            epochs=epochs, batch_size=batch_size
+        self.dot = layers.Dot(axes=1, name='cosine_similarity')
+
+        # Save architecture parameters for serialization
+        self.user_layers = user_layers
+        self.movie_layers = movie_layers
+        self.user_reg = user_reg
+        self.movie_reg = movie_reg
+
+        self.compile(
+            optimizer=optimizers.Nadam(learning_rate=self.learning_rate),
+            loss='mse',
+            metrics=['mae', 'mse']
         )
+        
+    def get_config(self):
+        config = super().get_config()
+        config.update({
+            'num_user_features': self.num_user_features,
+            'num_movie_features': self.num_movie_features,
+            'embedding': self.embedding,
+            'learning_rate': self.learning_rate,
+            'user_layers': self.user_layers,
+            'movie_layers': self.movie_layers,
+            'user_reg': self.user_reg,
+            'movie_reg': self.movie_reg
+        })
+        return config
 
-    def predict(self, X_user, X_item):
-        return self.model.predict([X_user, X_item])
+    @classmethod
+    def from_config(cls, config):
+        return cls(**config)
+    
+    def call(self, inputs):
+        user_input, movie_input = inputs
+        user_embedding = tf.nn.l2_normalize(self.user_net(user_input), axis=1)
+        movie_embedding = tf.nn.l2_normalize(self.movie_net(movie_input), axis=1)
+        cos_sim = self.dot([user_embedding, movie_embedding])
+        return cos_sim
 
-    def save(self, path):
-        self.model.save(path)
-
-    def summary(self):
-        self.model.summary()
-
-    def recommend(self, user_vec, movie_matrix, user_seen_movie_indices, k=10, movie_titles=None):
-        # Prosiri user_vec na broj filmova
-        user_vecs = np.repeat(user_vec.reshape(1, -1), movie_matrix.shape[0], axis=0)
-        preds = self.predict(user_vecs, movie_matrix).flatten()
-        preds[list(user_seen_movie_indices)] = -np.inf
-        top_k_idx = preds.argsort()[-k:][::-1]
+    def recommend(self, user_vec, movie_matrix, user_seen_movie_indices = None, k=10, movie_titles=None):
+        user_vecs = tf.repeat(tf.reshape(user_vec, (1, -1)), tf.shape(movie_matrix)[0], axis=0)
+        preds = self.predict([user_vecs, movie_matrix])
+        # mask_indices = tf.constant(list(user_seen_movie_indices), dtype=tf.int32)
+        # preds = tf.tensor_scatter_nd_update(
+        #     tf.squeeze(preds),
+        #     tf.expand_dims(mask_indices, 1),
+        #     tf.fill([tf.size(mask_indices)], tf.constant(-float('inf'), dtype=preds.dtype))
+        # )
+        top_k_idx = tf.argsort(preds, direction='DESCENDING')[:k]
         if movie_titles is not None:
-            return [(movie_titles[i], preds[i]) for i in top_k_idx]
+            return [(movie_titles[int(i)], float(preds[i])) for i in top_k_idx]
         else:
-            return list(zip(top_k_idx, preds[top_k_idx]))
+            return [(int(i), float(preds[i])) for i in top_k_idx]
 
     def get_user_seen_movie_indices(self, user_id, ratings, movies):
-        # Pronađi movieid koje je user gledao
         gledani_movieid = set(ratings.filter(pl.col('userid') == user_id)['movieid'].to_list())
-        # Mapiraj movieid na indekse u X_movie_numpy
         movieid_to_idx = {movie_id: idx for idx, movie_id in enumerate(movies['movieid'].to_list())}
         return {movieid_to_idx[movie_id] for movie_id in gledani_movieid if movie_id in movieid_to_idx}
