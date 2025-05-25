@@ -58,76 +58,90 @@ def prep_pipeline(ratings, movies, user_id = None):
     
     return user_feature.collect(), movie_features.collect(), df
 
-#####U FUNKCII SCALE() VRATI POLARS DATAFRAME SA KOLONAMA USERA I FILMA, POSLE NAPRAVI FUNKCIJU TO_TF() KOJA  PREBACUJE U TENSOR I IMA OPCIJU DA VRATI NEKI USER_ID
+#####U FUNKCII SCALE() VRATI POLARS DATAFRAME SA KOLONAMA USERA I FILMA, POSLE NAPRAVI FUNKCIJU TO_TF() KOJA PREBACUJE U TENSOR I IMA OPCIJU DA VRATI NEKI USER_ID
 
 
 
+def scale(df, user, movies, user_id = None):
+    '''
+    Skaliranje numeričkih karakteristika i prebacivanje u tenzore
+    df - Polars DataFrame sa svim podacima
+    user - Polars DataFrame sa korisničkim karakteristikama
+    movies - Polars DataFrame sa filmskim karakteristikama
+    user_id - ako je None, onda se vracaju svi korisnici, ako je lista (ili int) onda se vraca samo taj korisnik
+    
+    '''
+    y = tf.convert_to_tensor(df.select(pl.col('rating')).to_numpy(), dtype=tf.float16)
 
-def scale(df, user, movies):
-    """
-    Skalira podatke i vraća numpy matrice + dict skalera.
-    Ako je user_id zadat, skalira samo za tog usera, ali koristi mean/std iz celog skupa.
-    """
-    # Računaj mean/std na celom skupu (user, movies)
     prva_user = df.columns.index('no genres listed')
     poslednja_user = df.columns.index('Western')
-    user_all = user.to_numpy()
-    user_mean = user_all.mean(axis=0)
-    user_std = user_all.std(axis=0)
-    movie_all = movies.select(['#ratings_film', 'year', 'avg_rating']).to_numpy()
-    movie_mean = movie_all.mean(axis=0)
-    movie_std = movie_all.std(axis=0)
-
-    y = df.select(pl.col('rating')).to_numpy().flatten()
-    X_user = df.select(df.columns[prva_user : poslednja_user + 1]).to_numpy()
-    X_movie_df = df.select(['year','avg_rating', '#ratings_film'] + [col for col in df.columns if col.endswith('_right')])
-    movie_num = X_movie_df.select(['#ratings_film', 'year', 'avg_rating']).to_numpy()
-    movie_cat = X_movie_df.select(pl.all().exclude(['#ratings_film', 'year', 'avg_rating'])).to_numpy()
-    X_user_scaled = (X_user - user_mean) / (user_std + 1e-7)
-    movie_num_scaled = (movie_num - movie_mean) / (movie_std + 1e-7)
-    X_movie_scaled = np.concatenate([movie_num_scaled, movie_cat], axis=1)
-    # Target skaliranje na [-1, 1]
-    y_min = y.min() if y.size > 0 else 0.0
-    y_max = y.max() if y.size > 0 else 1.0
-    y_scaled = 2 * (y - y_min) / (y_max - y_min) - 1 if y_max > y_min else y
-    scalers = {"user_mean": user_mean, "user_std": user_std, "movie_mean": movie_mean, "movie_std": movie_std, "y_min": y_min, "y_max": y_max}
-    return X_user_scaled, X_movie_scaled, y_scaled, scalers
-
-
-
-def NN_prep(df, user, movies, user_id = None):
-    '''
-    Prebacivanje u tenzore i skaliranje --> tf.Tensor
-    user_id - za listu usera, ako je None onda vraca tf.Tensor sa svim userima
-    '''
-    y = tf.convert_to_tensor(df.select(pl.col('rating')).to_series().to_list(), dtype=tf.float32)
-    prva_user = df.columns.index('no genres listed')
-    poslednja_user = df.columns.index('Western')
-    if user_id is None:
-        X_user = tf.convert_to_tensor(df.select(df.columns[prva_user : poslednja_user + 1])
-.to_numpy(), dtype=tf.float32)
-    else:
-        X_user = tf.convert_to_tensor(df.filter(pl.col('userid') == user_id).select(df.columns[prva_user : poslednja_user + 1]).to_numpy(), dtype=tf.float32)
+    ###prva kolona u X_user_ud je userid!!!, trebace za preporuke, za treniranje koristiti X_user
+    X_user_id = tf.convert_to_tensor(df.select(['userid'] + df.columns[prva_user : poslednja_user + 1]).to_numpy(), dtype=tf.float32)
     X_movie_df = df.select(['year','avg_rating', '#ratings_film'] + [col for col in df.columns if col.endswith('_right')])
     movie_num = tf.convert_to_tensor(X_movie_df.select(['#ratings_film', 'year', 'avg_rating']).to_numpy(), dtype=tf.float32)
     movie_cat = tf.convert_to_tensor(X_movie_df.select(pl.all().exclude(['#ratings_film', 'year', 'avg_rating'])).to_numpy(), dtype=tf.float32)
-    # Skaliranje (standardizacija) user i movie numeričkih karakteristika
+    # Standardizacija user i movie numeričkih
+    X_user = X_user_id[:, 1:]
     user_mean = tf.reduce_mean(X_user, axis=0)
     user_std = tf.math.reduce_std(X_user, axis=0)
-    X_user_scaled = (X_user - user_mean) / (user_std + 1e-7)
+    X_user_scaled = (X_user - user_mean) / (user_std)
+    X_user_id_scaled = tf.concat([X_user_id[:, :1], X_user_scaled], axis=1)  # Skalirano sa ID kolonom
     movie_mean = tf.reduce_mean(movie_num, axis=0)
     movie_std = tf.math.reduce_std(movie_num, axis=0)
     movie_num_scaled = (movie_num - movie_mean) / (movie_std)
     X_movie_scaled = tf.concat([movie_num_scaled, movie_cat], axis=1)
     # Target skaliranje na [-1, 1]
-    y_min = tf.reduce_min(y)
-    y_max = tf.reduce_max(y)
-    y_scaled = 2 * (y - y_min) / (y_max - y_min) - 1
+    y_scaled = 2 * (y - tf.reduce_min(y)) / (tf.reduce_max(y) - tf.reduce_min(y)) - 1
+    scalers = {"user_mean": user_mean, "user_std": user_std,"movie_mean": movie_mean,"movie_std": movie_std, "y_min": tf.reduce_min(y), "y_max": tf.reduce_max(y)}
+    if user_id is not None:
+        ###Ako je dat user id, filtriramo X_user_id_scaled i X_movie_scaled i vracamo samo korisnika sa tim user_id-om, ako nije vracamo sve korisnike
+        maska = tf.reduce_any(tf.equal(tf.expand_dims(X_user_id_scaled[:, 0], 1), tf.constant(user_id, dtype=X_user_id_scaled.dtype)), axis=1)
+        X_user_id_scaled = tf.boolean_mask(X_user_id_scaled, maska)
+        X_movie_scaled = tf.boolean_mask(X_movie_scaled, maska)
+        y_scaled = tf.boolean_mask(y_scaled, maska)
+        return X_user_id_scaled, X_movie_scaled, y_scaled, scalers
+    # Ako user_id nije naveden, vracamo sve korisnike bez filtriranja user_id-a
+    else:
+        return X_user_scaled, X_movie_scaled, y_scaled, scalers
+    
+   
 
-    # Vrati i transformatore za kasniju upotrebu
-    scalers = {"user_mean": user_mean, "user_std": user_std, "movie_mean": movie_mean, "movie_std": movie_std, "y_min": y_min, "y_max": y_max}
 
-    return X_user_scaled, X_movie_scaled, y_scaled, scalers
+
+
+# def NN_prep(df, user, movies, user_id = None):
+#     '''
+#     Prebacivanje u tenzore i skaliranje --> tf.Tensor
+#     user_id - za listu usera, ako je None onda vraca tf.Tensor sa svim userima
+#     '''
+#     y = tf.convert_to_tensor(df.select(pl.col('rating')).to_series().to_list(), dtype=tf.float32)
+#     prva_user = df.columns.index('no genres listed')
+#     poslednja_user = df.columns.index('Western')
+#     if user_id is None:
+#         X_user = tf.convert_to_tensor(df.select(df.columns[prva_user : poslednja_user + 1])
+# .to_numpy(), dtype=tf.float32)
+#     else:
+#         X_user = tf.convert_to_tensor(df.filter(pl.col('userid') == user_id).select(df.columns[prva_user : poslednja_user + 1]).to_numpy(), dtype=tf.float32)
+#     X_movie_df = df.select(['year','avg_rating', '#ratings_film'] + [col for col in df.columns if col.endswith('_right')])
+#     movie_num = tf.convert_to_tensor(X_movie_df.select(['#ratings_film', 'year', 'avg_rating']).to_numpy(), dtype=tf.float32)
+#     movie_cat = tf.convert_to_tensor(X_movie_df.select(pl.all().exclude(['#ratings_film', 'year', 'avg_rating'])).to_numpy(), dtype=tf.float32)
+#     # Skaliranje (standardizacija) user i movie numeričkih karakteristika
+#     user_mean = tf.reduce_mean(X_user, axis=0)
+#     user_std = tf.math.reduce_std(X_user, axis=0)
+#     X_user_scaled = (X_user - user_mean) / (user_std + 1e-7)
+#     movie_mean = tf.reduce_mean(movie_num, axis=0)
+#     movie_std = tf.math.reduce_std(movie_num, axis=0)
+#     movie_num_scaled = (movie_num - movie_mean) / (movie_std)
+#     X_movie_scaled = tf.concat([movie_num_scaled, movie_cat], axis=1)
+#     # Target skaliranje na [-1, 1]
+#     y_min = tf.reduce_min(y)
+#     y_max = tf.reduce_max(y)
+#     y_scaled = 2 * (y - y_min) / (y_max - y_min) - 1
+
+#     # Vrati i transformatore za kasniju upotrebu
+#     scalers = {"user_mean": user_mean, "user_std": user_std, "movie_mean": movie_mean, "movie_std": movie_std, "y_min": y_min, "y_max": y_max}
+
+#     return X_user_scaled, X_movie_scaled, y_scaled, scalers
 
 def inverse_transform_y(y_scaled, scalers):
     """

@@ -57,14 +57,46 @@ df.filter(pl.col('userid') == 103)
 
 
 //
+def scale(df, user, movies, user_id = None):
+    y = tf.convert_to_tensor(df.select(pl.col('rating')).to_numpy(), dtype=tf.float16)
+    check = df.select(pl.col(['userid', 'movieid', 'rating']))
 
 
+    prva_user = df.columns.index('no genres listed')
+    poslednja_user = df.columns.index('Western')
+    ###prva kolona u X_user_ud je userid!!!, trebace za preporuke, za treniranje koristiti X_user
+    X_user_id = tf.convert_to_tensor(df.select(['userid'] + df.columns[prva_user : poslednja_user + 1]).to_numpy(), dtype=tf.float32)
+    X_movie_df = df.select(['year','avg_rating', '#ratings_film'] + [col for col in df.columns if col.endswith('_right')])
+    movie_num = tf.convert_to_tensor(X_movie_df.select(['#ratings_film', 'year', 'avg_rating']).to_numpy(), dtype=tf.float32)
+    movie_cat = tf.convert_to_tensor(X_movie_df.select(pl.all().exclude(['#ratings_film', 'year', 'avg_rating'])).to_numpy(), dtype=tf.float32)
+    # Standardizacija user i movie numeričkih
+    X_user = X_user_id[:, 1:]
+    user_mean = tf.reduce_mean(X_user, axis=0)
+    user_std = tf.math.reduce_std(X_user, axis=0)
+    X_user_scaled = (X_user - user_mean) / (user_std)
+    X_user_id_scaled = tf.concat([X_user_id[:, :1], X_user_scaled], axis=1)  # Skalirano sa ID kolonom
+    movie_mean = tf.reduce_mean(movie_num, axis=0)
+    movie_std = tf.math.reduce_std(movie_num, axis=0)
+    movie_num_scaled = (movie_num - movie_mean) / (movie_std)
+    X_movie_scaled = tf.concat([movie_num_scaled, movie_cat], axis=1)
+    # Target skaliranje na [-1, 1]
+    y_scaled = 2 * (y - tf.reduce_min(y)) / (tf.reduce_max(y) - tf.reduce_min(y)) - 1
+    scalers = {"user_mean": user_mean, "user_std": user_std,"movie_mean": movie_mean,"movie_std": movie_std, "y_min": tf.reduce_min(y), "y_max": tf.reduce_max(y)}
+    if user_id is not None:
+        maska = tf.reduce_any(tf.equal(tf.expand_dims(X_user_id_scaled[:, 0], 1), tf.constant(user_id, dtype=X_user_id_scaled.dtype)), axis=1)
+        X_user_id_scaled = tf.boolean_mask(X_user_id_scaled, maska)
+        X_movie_scaled = tf.boolean_mask(X_movie_scaled, maska)
+        y_scaled = tf.boolean_mask(y_scaled, maska)
+        return X_user_id_scaled, X_movie_scaled, y_scaled, scalers
+    else:
+        return X_user_scaled, X_movie_scaled, y_scaled, scalers
 
 //
-
-X_user.shape
+user_id = [103, 104, 105, 106, 107, 108, 109, 110]
+user_id = 300
+tf.reduce_any(tf.equal(tf.expand_dims(X_user_id_scaled[:, 0], 1), tf.constant(user_id, dtype=X_user_id_scaled.dtype)), axis=1)
 //
-def scale(df, user, movies):
+def scale__(df, user, movies):
     y = df.select(pl.col('rating')).to_numpy()
     prva_user = df.columns.index('no genres listed')
     poslednja_user = df.columns.index('Western')
