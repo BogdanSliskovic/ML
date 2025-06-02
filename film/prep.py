@@ -1,6 +1,5 @@
 import polars as pl
 import os
-import numpy as np
 from sqlalchemy import create_engine
 import tensorflow as tf
 
@@ -58,9 +57,15 @@ def prep_pipeline(ratings, movies, user_id = None):
     
     return user_feature.collect(), movie_features.collect(), df
 
-#####U FUNKCII SCALE() VRATI POLARS DATAFRAME SA KOLONAMA USERA I FILMA, POSLE NAPRAVI FUNKCIJU TO_TF() KOJA PREBACUJE U TENSOR I IMA OPCIJU DA VRATI NEKI USER_ID
 
-
+def global_scalers():
+    engine = create_engine(f"postgresql+psycopg2://postgres:{os.getenv('POSTGRES_PASSWORD')}@localhost:5432/movie_recommendation")
+    conn = engine.connect()
+    df = pl.read_database(query='SELECT * FROM raw.ratings', connection=conn)
+    user, movies_feat, df = prep_pipeline(df, pl.read_database(query='SELECT * FROM raw.movies', connection=conn))
+    _, _ , _, scalers = scale(df, user, movies_feat)
+    conn.close()
+    return scalers
 
 def scale(df, user, movies, user_id = None):
     '''
@@ -84,7 +89,7 @@ def scale(df, user, movies, user_id = None):
     X_user = X_user_id[:, 1:]
     user_mean = tf.reduce_mean(X_user, axis=0)
     user_std = tf.math.reduce_std(X_user, axis=0)
-    X_user_scaled = (X_user - user_mean) / (user_std)
+    X_user_scaled = (X_user - user_mean) / (user_std+ 1e-8)
     X_user_id_scaled = tf.concat([X_user_id[:, :1], X_user_scaled], axis=1)  # Skalirano sa ID kolonom
     movie_mean = tf.reduce_mean(movie_num, axis=0)
     movie_std = tf.math.reduce_std(movie_num, axis=0)
@@ -105,6 +110,37 @@ def scale(df, user, movies, user_id = None):
         return X_user_scaled, X_movie_scaled, y_scaled, scalers
     
    
+def batch_generator(movies, batch_size=1000000, total = 2e7):
+    '''
+    Pravi skupove od batch_size (milion) iz nasumicnih total (20 miliona) redova u tabeli ratings
+    '''
+    engine = create_engine(f"postgresql+psycopg2://postgres:{os.getenv('POSTGRES_PASSWORD')}@localhost:5432/movie_recommendation")
+    conn = engine.connect()
+    offset = 0
+    while offset < total:
+        query = f"SELECT * FROM raw.ratings LIMIT {batch_size} OFFSET {offset}"
+        batch = pl.read_database(query=query, connection=conn)
+        if batch.height == 0:
+            break
+        user, movies_feat, df = prep_pipeline(batch, movies, batch)
+        X_user, X_movie, y, scalers = scale(df, user, movies_feat)
+        yield (X_user, X_movie), tf.squeeze(y)
+        offset += batch_size
+    conn.close()
+ 
+# def train_test_split(X_user, X_movie, y, test_size=0.2, random_state= 42):       
+#     N = X_user.shape[0]
+#     tf.random.set_seed(random_state)
+#     idx = tf.random.shuffle(tf.range(N))
+#     split = int(N * (1 - test_size))
+#     train_idx = idx[:split]
+#     dev_idx = idx[split:]
+
+#     X_user_train, X_movie_train, y_train = tf.gather(X_user, train_idx), tf.gather(X_movie, train_idx), tf.gather(y, train_idx)
+
+#     X_user_dev, X_movie_dev, y_dev = tf.gather(X_user, dev_idx), tf.gather(X_movie, dev_idx), tf.gather(y, dev_idx)
+    
+#     return (X_user_train, X_movie_train), y_train, (X_user_dev, X_movie_dev), y_dev
 
 
 
@@ -170,17 +206,3 @@ def inverse_transform_X_movie_num(X_movie_num_scaled, scalers):
 
 
 
-# def batch_generator(movies, batch_size=4096):
-#     engine = create_engine(f"postgresql+psycopg2://postgres:{os.getenv('POSTGRES_PASSWORD')}@localhost:5432/movie_recommendation")
-#     conn = engine.connect()
-#     offset = 0
-#     while True:
-#         query = f"SELECT * FROM data_lake.ratings LIMIT {batch_size} OFFSET {offset}"
-#         batch = pl.read_database(query=query, connection=conn)
-#         if batch.height == 0:
-#             break
-#         user, movies_feat, df = prep_pipeline(batch, movies, batch)
-#         X_user, X_movie, y = NN_prep(df, user, movies_feat)
-#         yield (X_user, X_movie), y
-#         offset += batch_size
-#     conn.close()

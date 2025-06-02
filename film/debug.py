@@ -3,6 +3,9 @@ import os
 import numpy as np
 from sqlalchemy import create_engine
 import tensorflow as tf
+from prep import *
+
+
 
 engine = create_engine(f"postgresql+psycopg2://postgres:{os.getenv('POSTGRES_PASSWORD')}@localhost:5432/movie_recommendation")
 conn = engine.connect()
@@ -229,3 +232,64 @@ def inverse_transform_X_movie_num(X_movie_num_scaled, scalers):
         user_embedding = tf.nn.l2_normalize(self.user_net(user_input), axis=1)
         movie_embedding = tf.nn.l2_normalize(self.movie_net(movie_input), axis=1)
         cos_sim = self.dot([user_embedding, movie_embedding])
+        
+        
+        def batch_generator(movies, batch_size=100000):
+    engine = create_engine(f"postgresql+psycopg2://postgres:{os.getenv('POSTGRES_PASSWORD')}@localhost:5432/movie_recommendation")
+    conn = engine.connect()
+    offset = 0
+    while True:
+        query = f"SELECT * FROM data_lake.ratings LIMIT {batch_size} OFFSET {offset}"
+        batch = pl.read_database(query=query, connection=conn)
+        if batch.height == 0:
+            break
+        # Preprocesiranje u Polarsu
+        user, movies_feat, df = prep_pipeline(batch, movies, batch)
+        X_user, X_movie, y, _ = scale(df, user, movies_feat)
+        yield (X_user, X_movie), y
+        offset += batch_size
+    conn.close()    
+        
+        
+        
+def batch_generator(movies, batch_size=1000000):
+    engine = create_engine(f"postgresql+psycopg2://postgres:{os.getenv('POSTGRES_PASSWORD')}@localhost:5432/movie_recommendation")
+    conn = engine.connect()
+    offset = 0
+    total = 2e7 # 2 miliona redova
+    while offset < total:
+        query = f"SELECT * FROM raw.ratings LIMIT {batch_size} OFFSET {offset}"
+        batch = pl.read_database(query=query, connection=conn)
+        if batch.height == 0:
+            break
+        user, movies_feat, df = prep_pipeline(batch, movies, batch)
+        X_user, X_movie, y, _ = scale(df, user, movies_feat)
+        yield (X_user, X_movie), tf.squeeze(y)
+        offset += batch_size
+    conn.close()       
+
+engine = create_engine(f"postgresql+psycopg2://postgres:{os.getenv('POSTGRES_PASSWORD')}@localhost:5432/movie_recommendation")
+conn = engine.connect()
+movies = pl.read_database(query='SELECT * FROM raw.movies', connection=conn)
+conn.close()
+
+
+dataset = tf.data.Dataset.from_generator(
+    lambda: batch_generator(movies, batch_size=1000000),
+    output_signature=(
+        (tf.TensorSpec(shape=(None, 20), dtype=tf.float32, name= 'X_user'),
+         tf.TensorSpec(shape=(None, 23), dtype=tf.float32, name='X_movie')),
+        tf.TensorSpec(shape=(None,), dtype=tf.float32, name='y')
+    )
+)
+dataset = dataset.unbatch().batch(4096).prefetch(tf.data.AUTOTUNE)
+    
+for batch in dataset.take(1):
+    (X_user_batch, X_movie_batch), y_batch = batch
+    print("X_user_batch shape:", X_user_batch.shape)
+    print("X_movie_batch shape:", X_movie_batch.shape)
+    print("y_batch shape:", y_batch.shape)
+    print("X_user_batch:", X_user_batch.numpy()[0])
+    print("X_movie_batch:", X_movie_batch.numpy()[0])
+    print("y_batch:", y_batch.numpy()[0])
+
