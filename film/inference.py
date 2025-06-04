@@ -66,10 +66,23 @@ movies.select(['movieid', 'title']).join(
 
 movies.filter(pl.col('movieid') == film_id).select(['movieid', 'title'])
 
+### inference.py 
+m_net = model.movie_net
+m_embed = m_net.predict(X_movie)
+print(m_embed.shape)
 
+X_user_id, _, y_id, _ = scale(df, user, movies_feat, user_id = 28)
+u_id = X_user_id[0,0]
+m_id = 
+X_user_id = X_user_id[0,1:]  ##SVAKI RED JE ISTI, A PRVA KOL JE USER_ID
 
+u_net = model.user_net
+u_embed = u_net.predict(tf.expand_dims(X_user_id,0))
+print(u_embed.shape)
 
-
+pred = tf.linalg.matmul(u_embed, m_embed, transpose_b= True)
+val, idx = tf.math.top_k(pred, k = 10)
+tf.gather(pred, idx, axis = 1) == val
 
 
 

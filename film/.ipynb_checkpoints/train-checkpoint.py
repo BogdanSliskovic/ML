@@ -7,6 +7,50 @@ import tensorflow as tf
 from keras import layers, Input, regularizers, Model, optimizers
 from keras.callbacks import EarlyStopping, ReduceLROnPlateau
 import joblib
+///
+###TRAIN.py
+
+###
+#samo za RZS
+movies = pl.read_csv(r'https://raw.githubusercontent.com/BogdanSliskovic/ML/refs/heads/main/film/movies.csv')
+movies.name = 'Movies'
+ratings = pl.read_csv(r'https://raw.githubusercontent.com/BogdanSliskovic/ML/refs/heads/main/film/ratings_RZS.csv')
+ratings.name = 'Ratings'
+
+for df in [movies, ratings]:
+  print(df.name , df.schema, df.shape)
+
+user, movies_feat, df = prep_pipeline(ratings, movies)
+X_user, X_movie, y, scalers = scale(df, user, movies_feat)
+
+def prep_tf(user, movies, training_batch = 16):
+  user, movies_feat, df = prep_pipeline(ratings, movies)
+  X_user, X_movie, y, scalers = scale(df, user, movies_feat)
+  data = (X_user, X_movie), y
+  data = tf.data.Dataset.from_tensor_slices(data).batch(training_batch)
+  return data
+###
+def split(data):
+  (X_user_test, X_movie_test), y_test = next(iter(data))
+  (X_user_dev, X_movie_dev), y_dev = next(iter(data.skip(1)))
+  train_data = data.skip(2).prefetch(tf.data.AUTOTUNE).repeat()
+  return ((X_user_test, X_movie_test, y_test), (X_user_dev, X_movie_dev, y_dev), train_data)
+
+data = prep_tf(ratings, movies)
+test_set, dev_set, train_data = split(data)
+
+X_user_test, X_movie_test, y_test = test_set
+X_user_dev, X_movie_dev, y_dev = dev_set
+
+
+model = ColaborativeFiltering(20, 23 ,user_layers = [256, 128, 64],embedding=64, learning_rate=0.001)#, user_reg = [regularizers.l2(0.01), None, None])
+callbacks = [EarlyStopping(monitor='val_loss', patience=4, restore_best_weights=True), ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=2, min_lr=1e-6, verbose=1)]
+history = model.fit(train_data, epochs=50,validation_data = ((X_user_dev, X_movie_dev), y_dev), callbacks=callbacks, steps_per_epoch = int(10000/16))
+
+
+///
+
+
 
 engine = create_engine(f"postgresql+psycopg2://postgres:{os.getenv('POSTGRES_PASSWORD')}@localhost:5432/movie_recommendation")
 conn = engine.connect()
