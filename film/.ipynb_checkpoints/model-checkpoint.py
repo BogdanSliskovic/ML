@@ -13,20 +13,18 @@ class ColaborativeFiltering(tf.keras.Model):
         self.embedding = embedding
         self.learning_rate = learning_rate
 
-        # User branch
         user_dense_layers = []
         for i, units in enumerate(user_layers):
             reg = user_reg[i] if user_reg is not None else None
-            user_dense_layers.append(layers.Dense(units, activation='tanh', kernel_initializer='glorot_uniform', kernel_regularizer=reg))
+            user_dense_layers.append(layers.Dense(units, activation='relu', kernel_initializer='he_normal', kernel_regularizer=reg))
 
-        user_dense_layers.append(layers.Dense(self.embedding, activation='tanh', kernel_initializer='glorot_uniform'))
+        user_dense_layers.append(layers.Dense(self.embedding, activation='tanh', kernel_initializer='he_normal'))
         self.user_net = tf.keras.Sequential(user_dense_layers)
 
-        # movie branch
         movie_dense_layers = []
         for units in movie_layers:
-            movie_dense_layers.append(layers.Dense(units, activation='tanh', kernel_initializer='glorot_uniform'))
-        movie_dense_layers.append(layers.Dense(self.embedding, activation='tanh', kernel_initializer='glorot_uniform'))
+            movie_dense_layers.append(layers.Dense(units, activation='tanh', kernel_initializer='he_normal'))
+        movie_dense_layers.append(layers.Dense(self.embedding, activation='tanh', kernel_initializer='he_normal'))
         self.movie_net = tf.keras.Sequential(movie_dense_layers)
 
         self.dot = layers.Dot(axes=1, name='cosine_similarity')

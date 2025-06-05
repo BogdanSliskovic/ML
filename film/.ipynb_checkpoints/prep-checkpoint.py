@@ -2,6 +2,7 @@ import polars as pl
 import os
 from sqlalchemy import create_engine
 import tensorflow as tf
+from tqdm import tqdm 
 
 '''Funkcije za pripremu podataka za collaborative filtering model'''
 
@@ -23,8 +24,7 @@ def prep_pipeline(ratings, movies, user_id = None):
     #PROSECAN BROJ OCENA PO FILMU
     num_ratings = ratings.group_by('movieid').agg(pl.len().alias('#ratings_film'))
     user = ratings.join(num_ratings, on = 'movieid', how = 'inner').sort(['movieid', 'userid'])
-    movies = movies.with_columns(pl.col("genres").str.split("|"))
-    unique_genres = sorted(set(g for genre in movies["genres"] for g in genre))
+    movies, unique_genres = get_genres(movies, prep = True)
     #LAZY!
     user = user.lazy()
     movies = movies.lazy()
@@ -58,6 +58,15 @@ def prep_pipeline(ratings, movies, user_id = None):
     return user_feature.collect(), movie_features.collect(), df
 
 
+def get_genres(movies, prep = False):
+    movies = movies.with_columns(pl.col("genres").str.split("|"))
+    unique_genres = sorted(set(g for genre in movies["genres"] for g in genre))
+    unique_genres[0] = unique_genres[0].replace('(', '').replace(')', '')
+    if prep == True:
+      return movies, unique_genres
+    else:
+      return unique_genres
+    
 def global_scalers():
     engine = create_engine(f"postgresql+psycopg2://postgres:{os.getenv('POSTGRES_PASSWORD')}@localhost:5432/movie_recommendation")
     conn = engine.connect()
@@ -101,10 +110,9 @@ def scale(df, user, movies, user_id = None):
     if user_id is not None:
         ###Ako je dat user id, filtriramo X_user_id_scaled i X_movie_scaled i vracamo samo korisnika sa tim user_id-om, ako nije vracamo sve korisnike
         maska = tf.reduce_any(tf.equal(tf.expand_dims(X_user_id_scaled[:, 0], 1), tf.constant(user_id, dtype=X_user_id_scaled.dtype)), axis=1)
-        X_user_id_scaled = tf.boolean_mask(X_user_id_scaled, maska)
-        X_movie_scaled = tf.boolean_mask(X_movie_scaled, maska)
+        X_user_id_scaled = tf.boolean_mask(X_user_id_scaled, maska)  #prva kolona je userid
         y_scaled = tf.boolean_mask(y_scaled, maska)
-        return X_user_id_scaled, X_movie_scaled, y_scaled, scalers
+        return X_user_id_scaled,X_movie_scaled maska , y_scaled, scalers
     # Ako user_id nije naveden, vracamo sve korisnike bez filtriranja user_id-a
     else:
         return X_user_scaled, X_movie_scaled, y_scaled, scalers
@@ -127,7 +135,60 @@ def batch_generator(movies, batch_size=1000000, total = 2e7):
         yield (X_user, X_movie), tf.squeeze(y)
         offset += batch_size
     conn.close()
- 
+
+def sql_data_storage(data, kolone):
+    engine = create_engine(f"postgresql+psycopg2://postgres:{os.getenv('POSTGRES_PASSWORD')}@localhost:5432/movie_recommendation")
+    conn = engine.connect()
+
+    first = True
+    for (X_user, X_movie), y in tqdm(data):
+        user_np = X_user.numpy()
+        movie_np = X_movie.numpy()
+        y_np = y.numpy().reshape(-1, 1)
+
+
+        df = pl.DataFrame( data=np.hstack([user_np, movie_np, y_np]),schema=kolone)
+        df.write_database('data_storage.ratings', conn, if_table_exists='replace' if first else 'append')
+        first = False
+
+    conn.close()
+
+def traning_scalers(kolone):
+    engine = create_engine(f"postgresql+psycopg2://postgres:{os.getenv('POSTGRES_PASSWORD')}@localhost:5432/movie_recommendation")
+    conn = engine.connect()
+    q = [f'AVG({i}) as mean_{i}, STDDEV({i}) as sd_{i}' for i in kolone]
+
+    query = f'SELECT {", ".join(q)} FROM data_storage.ratings;'
+    
+    stats = pl.read_database(query, connection = conn)  
+    return stats
+
+
+###samo RZS?
+def prep_tf(user, movies, training_batch = 16):
+  user, movies_feat, df = prep_pipeline(ratings, movies)
+  X_user, X_movie, y, scalers = scale(df, user, movies_feat)
+  data = (X_user, X_movie), y
+  data = tf.data.Dataset.from_tensor_slices(data).batch(training_batch)
+  return data
+
+def split(data, test_batches = 1):
+    test_data = list(data.take(test_batches))
+    dev_data = list(data.skip(test_batches).take(test_batches))
+    train_data = data.skip(2 * test_batches).prefetch(tf.data.AUTOTUNE).repeat()
+
+    X_user_test = tf.concat([b[0][0] for b in test_data], axis=0)
+    X_movie_test = tf.concat([b[0][1] for b in test_data], axis=0)
+    y_test = tf.concat([b[1] for b in test_data], axis=0)
+
+    X_user_dev = tf.concat([b[0][0] for b in dev_data], axis=0)
+    X_movie_dev = tf.concat([b[0][1] for b in dev_data], axis=0)
+    y_dev = tf.concat([b[1] for b in dev_data], axis=0)
+
+    return ((X_user_test, X_movie_test, y_test),
+            (X_user_dev, X_movie_dev, y_dev),
+            train_data)
+    
 # def train_test_split(X_user, X_movie, y, test_size=0.2, random_state= 42):       
 #     N = X_user.shape[0]
 #     tf.random.set_seed(random_state)

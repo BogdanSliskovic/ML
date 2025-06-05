@@ -14,6 +14,43 @@ history = joblib.load('history_proba.pkl')
 
 # engine = create_engine(f"postgresql+psycopg2://postgres:{os.getenv('POSTGRES_PASSWORD')}@localhost:5432/movie_recommendation")
 # conn = engine.connect()
+
+
+
+
+
+m_net = model.movie_net
+m_embed = m_net.predict(X_movie)
+
+X_user_id, maska ,y_id = scale(df, user, movies_feat, user_id = 28)
+u_id = X_user_id[0,0]
+X_user_id = X_user_id[0:1,1:]  ##SVAKI RED JE ISTI, A PRVA KOL JE USER_ID, MORA 0:1 DA BI SHAPE BIO (1,-1)
+
+u_net = model.user_net
+u_embed = u_net.predict(X_user_id)
+print(u_embed.shape)
+
+pred = tf.linalg.matmul(u_embed, m_embed, transpose_b= True)
+pred_negledani = tf.boolean_mask(pred, ~maska, axis = 1)
+val, idx = tf.math.top_k(pred_negledani, k = 10)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 tf.random.set_seed(42)
 lista_id = tf.convert_to_tensor(df.select(pl.col('userid').unique()).to_numpy().flatten(), dtype=tf.float32)
 user_ids = tf.random.shuffle(lista_id)[:5]
