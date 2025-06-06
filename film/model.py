@@ -66,22 +66,22 @@ class ColaborativeFiltering(tf.keras.Model):
         cos_sim = self.dot([user_embedding, movie_embedding])
         return cos_sim
 
-    def recommend(self, user_vec, movie_matrix, user_seen_movie_indices = None, k=10, movie_titles=None):
-        user_vecs = tf.repeat(tf.reshape(user_vec, (1, -1)), tf.shape(movie_matrix)[0], axis=0)
-        preds = self.predict([user_vecs, movie_matrix])
-        # mask_indices = tf.constant(list(user_seen_movie_indices), dtype=tf.int32)
-        # preds = tf.tensor_scatter_nd_update(
-        #     tf.squeeze(preds),
-        #     tf.expand_dims(mask_indices, 1),
-        #     tf.fill([tf.size(mask_indices)], tf.constant(-float('inf'), dtype=preds.dtype))
-        # )
-        top_k_idx = tf.argsort(preds, direction='DESCENDING')[:k]
-        if movie_titles is not None:
-            return [(movie_titles[int(i)], float(preds[i])) for i in top_k_idx]
-        else:
-            return [(int(i), float(preds[i])) for i in top_k_idx]
+    # def recommend(self, user_vec, movie_matrix, user_seen_movie_indices = None, k=10, movie_titles=None):
+    #     user_vecs = tf.repeat(tf.reshape(user_vec, (1, -1)), tf.shape(movie_matrix)[0], axis=0)
+    #     preds = self.predict([user_vecs, movie_matrix])
+    #     # mask_indices = tf.constant(list(user_seen_movie_indices), dtype=tf.int32)
+    #     # preds = tf.tensor_scatter_nd_update(
+    #     #     tf.squeeze(preds),
+    #     #     tf.expand_dims(mask_indices, 1),
+    #     #     tf.fill([tf.size(mask_indices)], tf.constant(-float('inf'), dtype=preds.dtype))
+    #     # )
+    #     top_k_idx = tf.argsort(preds, direction='DESCENDING')[:k]
+    #     if movie_titles is not None:
+    #         return [(movie_titles[int(i)], float(preds[i])) for i in top_k_idx]
+    #     else:
+    #         return [(int(i), float(preds[i])) for i in top_k_idx]
 
-    def get_user_seen_movie_indices(self, user_id, ratings, movies):
-        gledani_movieid = set(ratings.filter(pl.col('userid') == user_id)['movieid'].to_list())
-        movieid_to_idx = {movie_id: idx for idx, movie_id in enumerate(movies['movieid'].to_list())}
-        return {movieid_to_idx[movie_id] for movie_id in gledani_movieid if movie_id in movieid_to_idx}
+    # def get_user_seen_movie_indices(self, user_id, ratings, movies):
+    #     gledani_movieid = set(ratings.filter(pl.col('userid') == user_id)['movieid'].to_list())
+    #     movieid_to_idx = {movie_id: idx for idx, movie_id in enumerate(movies['movieid'].to_list())}
+    #     return {movieid_to_idx[movie_id] for movie_id in gledani_movieid if movie_id in movieid_to_idx}
