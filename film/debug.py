@@ -293,3 +293,7 @@ for batch in dataset.take(1):
     print("X_movie_batch:", X_movie_batch.numpy()[0])
     print("y_batch:", y_batch.numpy()[0])
 
+////
+ratings, movies = read_data_lake()
+
+X_user, X_movie = prep_pipeline(ratings, movies)

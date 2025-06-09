@@ -3,6 +3,7 @@ import os
 from sqlalchemy import create_engine
 import tensorflow as tf
 from tqdm import tqdm 
+import numpy as np
 
 '''Funkcije za pripremu podataka za collaborative filtering model'''
 
@@ -17,7 +18,7 @@ def read_data_lake():
     conn.close()
     return ratings, movies
 
-def prep_pipeline(ratings, movies, user_id = None):
+def prep_pipeline(ratings, movies):
     '''
     Priprema za model
     '''
@@ -28,34 +29,33 @@ def prep_pipeline(ratings, movies, user_id = None):
     #LAZY!
     user = user.lazy()
     movies = movies.lazy()
+    ratings = ratings.lazy()
     #SVI ZANROVI
     for genre in unique_genres:
         movies = movies.with_columns(pl.col("genres").list.contains(genre).cast(pl.Int8).alias(genre))
     movies = movies.drop('genres')
     #KOLONA GODINA
     movies = movies.with_columns(pl.col("title").str.extract(r"\((\d{4})\)", 1).cast(pl.Int16).alias("year"))
-    
+
     #ISTI FORMAT TABELE KAO MOVIES
     user_zanr_train = user.join(movies, on='movieid', how='inner')
-    
+
     #PIVOT LONGER --> ZANROVE PREBACUJEM U JEDNU KOLONU
     user_longer = (user_zanr_train.unpivot(index=['userid', 'rating'],
-                                           on=unique_genres).filter(pl.col('value') == 1).rename({'variable': 'genre', 'value': 'is_genre'}))
-    
+                                            on=unique_genres).filter(pl.col('value') == 1).rename({'variable': 'genre', 'value': 'is_genre'}))
+
     #RACUNAM PROSEK ZA SVAKOG USERA ZA SVAKI ZANR I VRACAM U WIDE FORMAT
     user_feature = user_longer.group_by('userid').agg([(pl.when(pl.col('genre') == genre).then(pl.col('rating')).mean().alias(genre)) for genre in unique_genres]).fill_null(0)
     movie_avg_rating = (user.group_by('movieid').agg(pl.col('rating').mean().alias('avg_rating')))
     movie_features = movies.join(movie_avg_rating, on='movieid', how='left').fill_null(0)
     movie_features = movie_features.select(['movieid', 'title','year','avg_rating', *unique_genres])
-    df = user.join(user_feature, on="userid", how="inner").join(movie_features, on="movieid", how="inner")
-    df = df.collect()
-    movie_features = movie_features.rename({"(no genres listed)": "no genres listed"})
-    user_feature = user_feature.rename({"(no genres listed)": "no genres listed"})
-    df = df.rename({"(no genres listed)": "no genres listed"})
-    user_feature = user_feature.sort('userid')
-    df = df.sort('userid')
+
+    X_user = ratings.join(user_feature, on="userid", how="inner").drop('rating').collect()
+
+    X_movie = user.join(movie_features, on="movieid", how="inner").drop('rating', 'title').collect()
+
     
-    return user_feature.collect(), movie_features.collect(), df
+    return X_user, X_movie
 
 
 def get_genres(movies, prep = False):
@@ -112,13 +112,13 @@ def scale(df, user, movies, user_id = None):
         maska = tf.reduce_any(tf.equal(tf.expand_dims(X_user_id_scaled[:, 0], 1), tf.constant(user_id, dtype=X_user_id_scaled.dtype)), axis=1)
         X_user_id_scaled = tf.boolean_mask(X_user_id_scaled, maska)  #prva kolona je userid
         y_scaled = tf.boolean_mask(y_scaled, maska)
-        return X_user_id_scaled,X_movie_scaled maska , y_scaled#, scalers
+        return X_user_id_scaled,X_movie_scaled, maska , y_scaled#, scalers
     # Ako user_id nije naveden, vracamo sve korisnike bez filtriranja user_id-a
     else:
         return X_user_scaled, X_movie_scaled, y_scaled#, scalers
     
    
-def batch_generator(movies, batch_size=1000000, total = 2e7):
+def batch_generator_(movies, batch_size=1000000, total = 2e7):
     '''
     Pravi skupove od batch_size (milion) iz nasumicnih total (20 miliona) redova u tabeli ratings
     '''
@@ -130,24 +130,23 @@ def batch_generator(movies, batch_size=1000000, total = 2e7):
         batch = pl.read_database(query=query, connection=conn)
         if batch.height == 0:
             break
-        user, movies_feat, df = prep_pipeline(batch, movies, batch)
-        X_user, X_movie, y = scale(df, user, movies_feat)
-        yield (X_user, X_movie), tf.squeeze(y)
+        _, _, df = prep_pipeline(batch, movies)
+        df = df.drop('title')
+        
+        # X_user, X_movie, y = scale(df, user, movies_feat)
+        # yield (X_user, X_movie), tf.squeeze(y)
+        df = tf.convert_to_tensor(df.to_numpy(), dtype=tf.float32)
+        yield df
         offset += batch_size
     conn.close()
 
-def sql_data_storage(data, kolone):
+def sql_data_storage(df, kolone):
     engine = create_engine(f"postgresql+psycopg2://postgres:{os.getenv('POSTGRES_PASSWORD')}@localhost:5432/movie_recommendation")
     conn = engine.connect()
 
     first = True
-    for (X_user, X_movie), y in tqdm(data):
-        user_np = X_user.numpy()
-        movie_np = X_movie.numpy()
-        y_np = y.numpy().reshape(-1, 1)
-
-
-        df = pl.DataFrame( data=np.hstack([user_np, movie_np, y_np]),schema=kolone)
+    for batch in tqdm(df):
+        df = pl.DataFrame(batch.numpy(), schema=kolone)
         df.write_database('data_storage.ratings', conn, if_table_exists='replace' if first else 'append')
         first = False
 
