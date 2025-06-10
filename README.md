@@ -22,6 +22,8 @@ The **primary key** in all tables is a combination of `user_id` and `movie_id`.
 Features from `data_storage.user` and `data_storage.movie` are fed into separate neural networks—**User Net** and **Movie Net**—which generate 64-dimensional L2-normalized embeddings.  
 Their dot product approximates **cosine similarity**, used to predict user–movie interaction.
 
+Detailed project description (local README file)[./film/README.md]
+
 
 
 
