@@ -53,7 +53,6 @@ def prep_pipeline(ratings, movies):
     X_user = ratings.join(user_feature, on="userid", how="inner").drop('rating').collect()
 
     X_movie = user.join(movie_features, on="movieid", how="inner").drop('rating', 'title').collect()
-
     
     return X_user, X_movie
 
