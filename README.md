@@ -7,10 +7,22 @@ This repository is organized into several subfolders, each containing a self-con
 
 ## Contents
 
-### [Movie Recommendation System](./film) (PostgreSQL + Keras)
+### [Movie Recommendation System](./film) (Polars, Tensorflow, PostgreSQL)
 
-Scalable recommendation engine built with PostgreSQL and neural collaborative filtering. Data is sampled from `raw.ratings`, moved to `data_lake.ratings` for training, transformed and stored in `data_storage.ratings`, while predictions are saved in `predictions.ratings`.  
-Model takes user genre preferences and movie metadata to predict ratings. Future automation planned via Apache Airflow for daily predictions and weekly retraining.
+![Architecture](film/Train.drawio.png)
+
+A recommendation engine built using PostgreSQL and neural collaborative filtering.  
+Data is sampled from `raw.ratings`, then moved to `data_lake.ratings` for training. It is transformed and stored in:
+
+- `data_storage.user`: contains average user ratings per genre  
+- `data_storage.movie`: contains average movie ratings per genre, release year, and number of ratings  
+
+The **primary key** in all tables is a combination of `user_id` and `movie_id`.
+
+Features from `data_storage.user` and `data_storage.movie` are fed into separate neural networks—**User Net** and **Movie Net**—which generate 64-dimensional L2-normalized embeddings.  
+Their dot product approximates **cosine similarity**, used to predict user–movie interaction.
+
+
 
 
 ### [Logistic Regression (NumPy)](./logisticRegression_Numpy)
