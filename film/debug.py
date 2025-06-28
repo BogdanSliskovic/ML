@@ -75,51 +75,61 @@ def batch_generator(movies, batch_size=1000000, total = 2e7):
         offset += batch_size
     conn.close()
 
-engine = create_engine(f"postgresql+psycopg2://postgres:{os.getenv('POSTGRES_PASSWORD')}@localhost:5432/movie_recommendation")
-conn = engine.connect()
-movies = pl.read_database(query='SELECT * FROM raw.movies', connection=conn)
-conn.close()
+# engine = create_engine(f"postgresql+psycopg2://postgres:{os.getenv('POSTGRES_PASSWORD')}@localhost:5432/movie_recommendation")
+# conn = engine.connect()
+# movies = pl.read_database(query='SELECT * FROM raw.movies', connection=conn)
+# conn.close()
 
-batch_size=1000000
+batch_size=2000000
 total=20000000
-from itertools import islice
 data = tf.data.Dataset.from_generator(lambda: batch_generator(movies, batch_size=batch_size, total=total), output_signature= (
     tf.TensorSpec(shape=(None, 22), dtype=tf.float32, name = 'user'),  # User features
     tf.TensorSpec(shape=(None, 25), dtype=tf.float32, name = 'movie')   # Movie features
 ))
-#samo za RZS
-movies = pl.read_csv(r'https://raw.githubusercontent.com/BogdanSliskovic/ML/refs/heads/main/film/movies.csv')
-ratings = pl.read_csv(r'https://raw.githubusercontent.com/BogdanSliskovic/ML/refs/heads/main/film/ratings_RZS.csv')
-X_user, X_movie = prep_pipeline(ratings, movies)
-X_user[:,2].mean()
+m = next(iter(data))[1]
+m
 
-n = 0
 def get_mean(data):
+    stats = {'mean': {}, 'std': {}}
     n = 0
-    user_mean = tf.zeros(20)
-    movie_mean = tf.zeros(3)
+    user_sum = tf.zeros(20)
+    user_sum_sq = tf.zeros(20)
+    user_count = tf.zeros(20)
+
+    movie_sum = tf.zeros(3)
+    movie_count = tf.zeros(3)
+    movie_sum_sq = tf.zeros(3)
+    
     for user, movie in (tqdm(data)):
         user_num = user[:, 2:] 
-        movie_num = movie[:, 2:5] 
-        for indeks, feat in enumerate([user_num, movie_num]):
-            maska = feat > 0
-            mask_float = tf.cast(maska, tf.float32)
-            sum_per_col = tf.reduce_sum(tf.where(maska, feat, tf.zeros_like(feat)), axis=0)
-            count_per_col = tf.reduce_sum(mask_float, axis=0)
-            mean_per_col = tf.where(count_per_col > 0, sum_per_col / count_per_col , tf.zeros_like(count_per_col))
+        movie_num = movie[:, 2:5]
+    for indeks, feat in enumerate([user_num, movie_num]):
+        sum = tf.reduce_sum(feat, axis=0)
+        count = tf.reduce_sum(tf.cast(feat > 0, tf.float32), axis=0)
+        sum_sq = tf.reduce_sum(tf.square(feat), axis=0)
 
-            if indeks == 0:
-                user_mean += mean_per_col
-            else:
-                movie_mean += mean_per_col
+        if indeks == 0:
+            user_sum += sum
+            user_count += count
+            user_sum_sq += sum_sq
+        else:
+            movie_sum += sum
+            movie_count += count
+            movie_sum_sq += sum_sq
 
         n += 1
-    user_mean /= n
-    movie_mean /= n
-    return user_mean, movie_mean
+    user_mean = tf.where(user_count > 0, user_sum / (user_count + 1e-6), tf.zeros_like(user_sum))
+    movie_mean = tf.where(movie_count > 0, movie_sum / (movie_count + 1e-6), tf.zeros_like(movie_sum))
 
-user_mean, movie_mean = get_mean(data)
+    stats['mean']['user'] = user_mean
+    stats['mean']['movie'] = movie_mean
 
+    stats['std']['user'] = user_sum_sq / (user_count + 1e-6) - tf.square(user_mean)
+    stats['std']['movie'] = movie_sum_sq / (movie_count + 1e-6) - tf.square(movie_mean)
+    return stats
+
+stats = get_mean(data)
+stats['mean']['user']
 
 
 def scale(df, user, movies, user_id = None):
