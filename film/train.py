@@ -1,186 +1,85 @@
 from prep import *
-from model import ColaborativeFiltering
-from sqlalchemy import create_engine
-import polars as pl
-import os
+from model import *
 import tensorflow as tf
-from keras import layers, Input, regularizers, Model, optimizers
-from keras.callbacks import EarlyStopping, ReduceLROnPlateau
+
+from tensorflow import keras
+from keras import layers
+from keras.saving import register_keras_serializable
 import joblib
-import numpy as np
-///
-###TRAIN.py
 
-###
-#samo za RZS
-movies = pl.read_csv(r'https://raw.githubusercontent.com/BogdanSliskovic/ML/refs/heads/main/film/movies.csv')
-movies.name = 'Movies'
-ratings = pl.read_csv(r'https://raw.githubusercontent.com/BogdanSliskovic/ML/refs/heads/main/film/ratings_RZS.csv')
-ratings.name = 'Ratings'
-
-for df in [movies, ratings]:
-  print(df.name , df.schema, df.shape)
-
-user, movies_feat, df = prep_pipeline(ratings__, movies)
-kolone = df.drop('title').columns
-kolone
-###RZS
-# X_user, X_movie, y, scalers = scale(df, user, movies_feat)
+csv_ratings = "../ml-32m/ratings_short.csv"
+csv_movies = "../ml-32m/movies.csv"
 
 
-# data = prep_tf(ratings, movies)
+user_kolone, movies_kolone = imena_kolona(csv_ratings, csv_movies)
 
- 
-# (X_user_test, X_movie_test, y_test), (X_user_dev, X_movie_dev, y_dev), train_data = split(data)
-
-
-# model = ColaborativeFiltering(20, 23 ,user_layers = [256, 128, 64],embedding=64, learning_rate=0.001)#, user_reg = [regularizers.l2(0.01), None, None])
-# callbacks = [EarlyStopping(monitor='val_loss', patience=4, restore_best_weights=True), ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=2 min_lr=1e-6, verbose=1)]
-# history = model.fit(train_data, epochs=5,validation_data = ((X_user_dev, X_movie_dev), y_dev), callbacks=callbacks, steps_per_epoch = int(10000/16))
-///
-num_ratings = ratings.group_by('movieid').agg(pl.len().alias('#ratings_film'))
-user = ratings.join(num_ratings, on = 'movieid', how = 'inner').sort(['movieid', 'userid'])
-movies, unique_genres = get_genres(movies, prep = True)
-#LAZY!
-# user = user.lazy()
-# movies = movies.lazy()
-# ratings = ratings.lazy()
-#SVI ZANROVI
-for genre in unique_genres:
-    movies = movies.with_columns(pl.col("genres").list.contains(genre).cast(pl.Int8).alias(genre))
-movies = movies.drop('genres')
-#KOLONA GODINA
-movies = movies.with_columns(pl.col("title").str.extract(r"\((\d{4})\)", 1).cast(pl.Int16).alias("year"))
-
-#ISTI FORMAT TABELE KAO MOVIES
-user_zanr_train = user.join(movies, on='movieid', how='inner')
-
-#PIVOT LONGER --> ZANROVE PREBACUJEM U JEDNU KOLONU
-user_longer = (user_zanr_train.unpivot(index=['userid', 
-'rating' ],                                        on=unique_genres).filter(pl.col('value') == 1).rename({'variable': 'genre', 'value': 'is_genre'}))
-
-#RACUNAM PROSEK ZA SVAKOG USERA ZA SVAKI ZANR I VRACAM U WIDE FORMAT
-user_feature = user_longer.group_by('userid').agg([(pl.when(pl.col('genre') == genre).then(pl.col('rating')).mean().alias(genre)) for genre in unique_genres]).fill_null(0)
-movie_avg_rating = (user.group_by('movieid').agg(pl.col('rating').mean().alias('avg_rating')))
-movie_features = movies.join(movie_avg_rating, on='movieid', how='left').fill_null(0)
-movie_features = movie_features.select(['movieid', 'title','year','avg_rating', *unique_genres])
-
-X_user = ratings.join(user_feature, on="userid", how="inner").drop('rating').collect()
-
-X_movie = user.join(movie_features, on="movieid", how="inner").drop('rating', 'title').collect()
+batch = 1000 #~32768
 
 
-X_movie.columns
-
-X_user, X_movie = user_feature.collect(), movie_features.collect()
-
-///
+data = tf.data.Dataset.from_generator(lambda: batch_generator(ratings_path= csv_ratings, movies_path= csv_movies,batch_size= batch, train = True), output_signature= ((tf.TensorSpec(shape=(None, 20), dtype=tf.float64, name = 'user'), tf.TensorSpec(shape=(None, 23), dtype=tf.float64, name = 'movie')), tf.TensorSpec(shape=(None,1), dtype=tf.float32)))
 
 
-prva_user = df.columns.index('no genres listed')
-poslednja_user = df.columns.index('Western')
-X_user_id = tf.convert_to_tensor(df.select(['userid', 'movieid'] + df.columns[prva_user : poslednja_user + 1]).to_numpy(), dtype=tf.float32)
-X_movie_df = df.select(['movieid','userid', 'year','avg_rating', '#ratings_film'] + [col for col in df.columns if col.endswith('_right')])
-movie_num = tf.convert_to_tensor(X_movie_df.select(['#ratings_film', 'year', 'avg_rating']).to_numpy(), dtype=tf.float32)
-movie_cat = tf.convert_to_tensor(X_movie_df.select(pl.all().exclude(['#ratings_film', 'year', 'avg_rating'])).to_numpy(), dtype=tf.float32)
-//
-engine = create_engine(f"postgresql+psycopg2://postgres:{os.getenv('POSTGRES_PASSWORD')}@localhost:5432/movie_recommendation")
-conn = engine.connect()
-movies = pl.read_database(query='SELECT * FROM raw.movies', connection=conn)
-conn.close()
+train_size = 100_000 // batch
+dev_size = 250_000 // batch
+test_size = 250_000 // batch
 
-total = 2000000
-training_batch = 100000
-def batch_generator(movies, batch_size=1000000, total = 2e7):
-    '''
-    Pravi skupove od batch_size (milion) iz nasumicnih total (20 miliona) redova u tabeli ratings
-    '''
-    engine = create_engine(f"postgresql+psycopg2://postgres:{os.getenv('POSTGRES_PASSWORD')}@localhost:5432/movie_recommendation")
-    conn = engine.connect()
-    offset = 0
-    while offset < total:
-        query = f"SELECT * FROM raw.ratings LIMIT {batch_size} OFFSET {offset}"
-        batch = pl.read_database(query=query, connection=conn)
-        # if batch.height == 0:
-            # break
-        user, movies, _ = prep_pipeline(batch, movies)
-        df = df.drop('title')
-        
-        # X_user, X_movie, y = scale(df, user, movies_feat)
-        # yield (X_user, X_movie), tf.squeeze(y)
-        df = tf.convert_to_tensor(df.to_numpy(), dtype=tf.float32)
-        yield df
-        offset += batch_size
-    conn.close()
-
-data = tf.data.Dataset.from_generator(lambda: batch_generator(movies, batch_size=training_batch, total=total), output_signature=(tf.TensorSpec(shape=(None, 46), dtype=tf.float32, name='df')))
-
-engine = create_engine(f"postgresql+psycopg2://postgres:{os.getenv('POSTGRES_PASSWORD')}@localhost:5432/movie_recommendation")
-conn = engine.connect()
-proba = pl.read_database(query='SELECT * FROM data_storage.ratings limit 1', connection=conn)
-conn.close()
-
-len(kolone)
-len(df.columns)
-df.columns[20:]
-next(iter(train_data))
-//
-engine = create_engine(f"postgresql+psycopg2://postgres:{os.getenv('POSTGRES_PASSWORD')}@localhost:5432/movie_recommendation")
-conn = engine.connect()
-
-first = True
-for df in tqdm(data):
-    temp = pl.DataFrame(df.numpy(), schema = kolone)
-    temp.write_database('data_storage.ratings', conn, if_table_exists='replace' if first else 'append')
-    first = False
-
-def traning_scalers(kolone):
-    engine = create_engine(f"postgresql+psycopg2://postgres:{os.getenv('POSTGRES_PASSWORD')}@localhost:5432/movie_recommendation")
-    conn = engine.connect()
-    q = [f'AVG(\"{i}\") as mean_{i}, STDDEV(\"{i}\") as sd_{i}' for i in kolone]
-
-    query = f'SELECT {", ".join(q)} FROM data_storage.ratings;'
-    
-    stats = pl.read_database(query, connection = conn)  
-    return stats
-traning_scalers(kolone)
-# temp
-# engine = create_engine(f"postgresql+psycopg2://postgres:{os.getenv('POSTGRES_PASSWORD')}@localhost:5432/movie_recommendation")
-# conn = engine.connect()
-# p = pl.read_database(query='SELECT * FROM data_storage.ratings', connection=conn)
-# conn.close()
+data_train = data.take(train_size).prefetch(tf.data.AUTOTUNE) #ne stavlja se repeat zbog adapt (beskonacno ga racuna posto nema kraja datasetu)
 
 
-df = next(iter(data))
+norm_user = standardizacija(data_train.map(lambda x,y: x[0]))
+norm_movies = standardizacija(data_train.map(lambda x,y: x[1][:,:3])) # samo prve tri kolone su numericke (#ratings_film, year, avg rating, ostale su dummy)
 
-sql_data_storage(train_data, kolone)
-//
 
-model = ColaborativeFiltering(20, 23 ,user_layers = [256, 128, 64],embedding=64, learning_rate=0.001)#, user_reg = [regularizers.l2(0.01), None, None])
+data_train = data_train.map(lambda x, y: ((norm_user(x[0]),tf.concat([tf.cast(norm_movies(x[1][:, :3]), tf.float32),tf.cast(x[1][:, 3:], tf.float32)], axis=1)),scale_y(y)))
+
+# Ulazi
+user_input = tf.keras.Input(shape=(20,), name="user_input")
+movie_input = tf.keras.Input(shape=(23,), name="movie_input")
+
+slojevi = [128, 64]
+embedding = 32
+
+u = user_input
+for sloj in slojevi:
+    u = layers.Dense(sloj, kernel_initializer='he_normal')(u)
+    u = layers.BatchNormalization()(u)
+    u = layers.Activation('relu')(u)
+u = layers.Dense(embedding, activation='relu', kernel_initializer='he_normal')(u)
+user_embedding = L2NormalizeLayer()(u)
+
+m = movie_input
+for sloj in slojevi:
+    m = layers.Dense(sloj, kernel_initializer='he_normal')(m)
+    m = layers.BatchNormalization()(m)
+    m = layers.Activation('relu')(m)
+m = layers.Dense(embedding, activation='relu', kernel_initializer='he_normal')(m)
+movie_embedding = L2NormalizeLayer()(m)
+
+# dot produkt i izlaz
+similarity = layers.Dot(axes=1, name='cosine_similarity')([user_embedding, movie_embedding])
+output = SqueezeLayer()(similarity)
+
+model = tf.keras.Model(inputs=[user_input, movie_input], outputs=output)
+
+model.compile(optimizer=keras.optimizers.Adam(learning_rate=0.001), loss='mse', metrics=['mae', 'mse'])
+
 model.summary()
-callbacks = [EarlyStopping(monitor='val_loss', patience=4, restore_best_weights=True), ReduceLROnPlateau(monitor='val_loss', factor=0.5, patience=2, min_lr=1e-6, verbose=1)]
-history = model.fit(train_data, epochs=20, validation_data=([X_user_dev,  X_movie_dev], y_dev), callbacks=callbacks, steps_per_epoch = int(total // training_batch))
 
-movies
+data_dev = data.skip(train_size).take(dev_size)
 
+data_dev = data_dev.map(lambda x, y: ((norm_user(x[0]),tf.concat([tf.cast(norm_movies(x[1][:, :3]), tf.float32),tf.cast(x[1][:, 3:], tf.float32)], axis=1)),scale_y(y))).prefetch(tf.data.AUTOTUNE)
 
-
-model.save('model_proba.keras')
-joblib.dump(history, 'history_proba.pkl')
-joblib.dump(scalers, 'scalers_proba.pkl')
-
-# from tensorflow.keras.models import load_model
-# load_model('model_proba.keras')
-
-# Export batches to SQL using the batch_generator, not the tf.data.Dataset
-from tqdm import tqdm
-engine = create_engine(f"postgresql+psycopg2://postgres:{os.getenv('POSTGRES_PASSWORD')}@localhost:5432/movie_recommendation")
-conn = engine.connect()
-first = True
-for _, _, df_batch in tqdm(batch_generator(movies, batch_size=training_batch, total=total)):
-    df_batch.write_database('data_storage.ratings', conn, if_table_exists='replace' if first else 'append')
-    first = False
-conn.close()
+data_test = data.skip(train_size).take(train_size + dev_size)
 
 
+data_test = data_test.map(lambda x, y: ((norm_user(x[0]),tf.concat([tf.cast(norm_movies(x[1][:, :3]), tf.float32),tf.cast(x[1][:, 3:], tf.float32)], axis=1)),scale_y(y))).prefetch(tf.data.AUTOTUNE)
+
+
+history = model.fit(data_train, validation_data=data_dev, epochs=20, steps_per_epoch=train_size, validation_steps=dev_size)
+
+
+model.save(f'model_128_64_32.keras')
+joblib.dump(history, 'histori_128_64_32.pkl')
+
+proba = keras.models.load_model('model_128_128_64_64.keras')
 

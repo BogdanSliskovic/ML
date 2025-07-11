@@ -3,7 +3,9 @@ import os
 from sqlalchemy import create_engine
 import tensorflow as tf
 from tqdm import tqdm 
-import numpy as np
+
+csv_ratings = "../ml-32m/ratings.csv"
+csv_movies = "../ml-32m/movies.csv"
 
 
 def prep_pipeline(ratings, movies):
@@ -11,8 +13,8 @@ def prep_pipeline(ratings, movies):
     Priprema za model
     '''
     #PROSECAN BROJ OCENA PO FILMU
-    num_ratings = ratings.group_by('movieid').agg(pl.len().alias('#ratings_film'))
-    user = ratings.join(num_ratings, on = 'movieid', how = 'inner').sort(['movieid', 'userid'])
+    num_ratings = ratings.group_by('movieId').agg(pl.len().alias('#ratings_film'))
+    user = ratings.join(num_ratings, on = 'movieId', how = 'inner').sort(['movieId', 'userId'])
     movies, unique_genres = get_genres(movies, prep = True)
     #LAZY!
     user = user.lazy()
@@ -26,21 +28,21 @@ def prep_pipeline(ratings, movies):
     movies = movies.with_columns(pl.col("title").str.extract(r"\((\d{4})\)", 1).cast(pl.Int16).alias("year"))
 
     #ISTI FORMAT TABELE KAO MOVIES
-    user_zanr_train = user.join(movies, on='movieid', how='inner')
+    user_zanr_train = user.join(movies, on='movieId', how='inner')
 
     #PIVOT LONGER --> ZANROVE PREBACUJEM U JEDNU KOLONU
-    user_longer = (user_zanr_train.unpivot(index=['userid', 'rating'],
+    user_longer = (user_zanr_train.unpivot(index=['userId', 'rating'],
                                             on=unique_genres).filter(pl.col('value') == 1).rename({'variable': 'genre', 'value': 'is_genre'}))
 
     #RACUNAM PROSEK ZA SVAKOG USERA ZA SVAKI ZANR I VRACAM U WIDE FORMAT
-    user_feature = user_longer.group_by('userid').agg([(pl.when(pl.col('genre') == genre).then(pl.col('rating')).mean().alias(genre)) for genre in unique_genres]).fill_null(0)
-    movie_avg_rating = (user.group_by('movieid').agg(pl.col('rating').mean().alias('avg_rating')))
-    movie_features = movies.join(movie_avg_rating, on='movieid', how='left').fill_null(0)
-    movie_features = movie_features.select(['movieid', 'title','year','avg_rating', *unique_genres])
+    user_feature = user_longer.group_by('userId').agg([(pl.when(pl.col('genre') == genre).then(pl.col('rating')).mean().alias(genre)) for genre in unique_genres]).fill_null(0)
+    movie_avg_rating = (user.group_by('movieId').agg(pl.col('rating').mean().alias('avg_rating')))
+    movie_features = movies.join(movie_avg_rating, on='movieId', how='left').fill_null(0)
+    movie_features = movie_features.select(['movieId', 'title','year','avg_rating', *unique_genres])
 
-    X_user = ratings.join(user_feature, on="userid", how="inner").drop('rating').collect()
+    X_user = ratings.join(user_feature, on="userId", how="inner").drop('rating').collect()
 
-    X_movie = user.join(movie_features, on="movieid", how="inner").drop('rating', 'title').collect()
+    X_movie = user.join(movie_features, on="movieId", how="inner").drop('rating', 'title').collect()
     
     return X_user, X_movie
 
@@ -53,105 +55,183 @@ def get_genres(movies, prep = False):
     else:
       return unique_genres
   
-def batch_generator(movies, batch_size=1000000, total = 2e7):
-    '''
-    Pravi skupove od batch_size (milion) iz nasumicnih total (20 miliona) redova u tabeli ratings
-    '''
-    engine = create_engine(f"postgresql+psycopg2://postgres:{os.getenv('POSTGRES_PASSWORD')}@localhost:5432/movie_recommendation")
-    conn = engine.connect()
+
+def batch_generator(batch_size=1_000_000):
+    """
+    Pravi batch-eve iz CSV fajla sa ocenjivanjem filmova (ratings).
+    """
+    movies = pl.read_csv(csv_movies)
     offset = 0
-    while offset < total:
-        query = f"SELECT * FROM raw.ratings LIMIT {batch_size} OFFSET {offset}"
-        batch = pl.read_database(query=query, connection=conn)
+    #Lazy prebroji redove
+    total_rows = pl.scan_csv(csv_ratings).select(pl.len()).collect()[0, 0]
+
+    while offset < total_rows:
+        batch = pl.read_csv(csv_ratings).slice(offset, batch_size)
         if batch.height == 0:
             break
+
         user, movie = prep_pipeline(batch, movies)
         
-        # X_user, X_movie, y = scale(df, user, movies_feat)
-        # yield (X_user, X_movie), tf.squeeze(y)
-        user = tf.convert_to_tensor(user.to_numpy(), dtype=tf.float32)
-        movie = tf.convert_to_tensor(movie.to_numpy(), dtype=tf.float32)
+        user = tf.convert_to_tensor(user.to_numpy(), dtype=tf.float64)
+        movie = tf.convert_to_tensor(movie.to_numpy(), dtype=tf.float64)
         yield (user, movie)
+
         offset += batch_size
-    conn.close()
 
-# engine = create_engine(f"postgresql+psycopg2://postgres:{os.getenv('POSTGRES_PASSWORD')}@localhost:5432/movie_recommendation")
-# conn = engine.connect()
-# movies = pl.read_database(query='SELECT * FROM raw.movies', connection=conn)
-# conn.close()
-
-batch_size=2000000
-total=20000000
-data = tf.data.Dataset.from_generator(lambda: batch_generator(movies, batch_size=batch_size, total=total), output_signature= (
-    tf.TensorSpec(shape=(None, 22), dtype=tf.float32, name = 'user'),  # User features
-    tf.TensorSpec(shape=(None, 25), dtype=tf.float32, name = 'movie')   # Movie features
+data = tf.data.Dataset.from_generator(lambda: batch_generator(), output_signature= (
+    tf.TensorSpec(shape=(None, 22), dtype=tf.float64, name = 'user'),  # User features
+    tf.TensorSpec(shape=(None, 25), dtype=tf.float64, name = 'movie')   # Movie features
 ))
-m = next(iter(data))[1]
-m
 
-def get_mean(data):
-    stats = {'mean': {}, 'std': {}}
-    n = 0
-    user_sum = tf.zeros(20)
-    user_sum_sq = tf.zeros(20)
-    user_count = tf.zeros(20)
 
-    movie_sum = tf.zeros(3)
-    movie_count = tf.zeros(3)
-    movie_sum_sq = tf.zeros(3)
-    
-    for user, movie in (tqdm(data)):
-        user_num = user[:, 2:] 
-        movie_num = movie[:, 2:5]
-    for indeks, feat in enumerate([user_num, movie_num]):
-        sum = tf.reduce_sum(feat, axis=0)
-        count = tf.reduce_sum(tf.cast(feat > 0, tf.float32), axis=0)
-        sum_sq = tf.reduce_sum(tf.square(feat), axis=0)
+from tensorflow.keras.layers import Normalization
 
-        if indeks == 0:
-            user_sum += sum
-            user_count += count
-            user_sum_sq += sum_sq
-        else:
-            movie_sum += sum
-            movie_count += count
-            movie_sum_sq += sum_sq
+# Kreiramo normalizacione layere
+norm_user = Normalization(axis = 1)
+norm_movie = Normalization()
 
-        n += 1
-    user_mean = tf.where(user_count > 0, user_sum / (user_count + 1e-6), tf.zeros_like(user_sum))
-    movie_mean = tf.where(movie_count > 0, movie_sum / (movie_count + 1e-6), tf.zeros_like(movie_sum))
+# OVO GA "UČI" (računa mean i variance)
+norm_user.adapt(user_ds)
+norm_movie.adapt(movie_ds)
 
-    stats['mean']['user'] = user_mean
-    stats['mean']['movie'] = movie_mean
+tf.math.sqrt(norm_user.variance)
 
-    stats['std']['user'] = user_sum_sq / (user_count + 1e-6) - tf.square(user_mean)
-    stats['std']['movie'] = movie_sum_sq / (movie_count + 1e-6) - tf.square(movie_mean)
-    return stats
+norm_user(user[:, 2:])
+for user, movie in data.take(1):
+    user_normed = norm_user(user[:, 2:])
+
+    print("Standardizovan user:", user_normed)
+
+print("Means po kolonama:", norm_user.mean.numpy())
+print("Variance po kolonama:", norm_user.variance.numpy())
+
+for user, movie in data.take(2):
+    print("User std:", tf.math.reduce_std(user[:, 2:], axis = 0).numpy())
+    print("Movie std:", tf.math.reduce_std(movie[:, 2:], axis = 0).numpy())
 
 stats = get_mean(data)
+for statisika in stats.keys():
+    for df in stats[statisika].keys():
+        globals()[f'{statisika}_{df}'] = stats[statisika][df]
+        
+        
+std_movie
+std_user
+        
+        print(stats[statisika][df])
 stats['mean']['user']
+stats['mean']['movie']
+tf.print(stats['mean']['user'], summarize = 20)
+
+ratings.group_by('userId').mean()['rating'].mean()
 
 
-def scale(df, user, movies, user_id = None):
-    '''
-    Skaliranje numeričkih karakteristika i prebacivanje u tenzore
-    df - Polars DataFrame sa svim podacima
-    user - Polars DataFrame sa korisničkim karakteristikama
-    movies - Polars DataFrame sa filmskim karakteristikama
-    user_id - ako je None, onda se vracaju svi korisnici, ako je lista (ili int) onda se vraca samo taj korisnik
+from model import ColaborativeFiltering
+from prep import *
+import tensorflow as tf
+from tqdm import tqdm 
+
+csv_ratings = "../ml-32m/ratings.csv"
+csv_movies = "../ml-32m/movies.csv"
+
+data = tf.data.Dataset.from_generator(lambda: batch_generator(batch_size= 1_000_000), output_signature= (tf.TensorSpec(shape=(None, 22), dtype=tf.float64, name = 'user'), tf.TensorSpec(shape=(None, 25), dtype=tf.float64, name = 'movie')))
+
+
+
+
+
+
+
+data = tf.data.Dataset.from_generator(lambda: batch_generator(ratings_path= csv_ratings, movies_path= csv_movies,batch_size= 1_000), output_signature= (tf.TensorSpec(shape=(None, 22), dtype=tf.float64, name = 'user'), tf.TensorSpec(shape=(None, 25), dtype=tf.float64, name = 'movie')))
+
+next(iter(data))
+
+model = ColaborativeFiltering(num_user_features=22, num_movie_features= 25)
+
+ratings = pl.read_csv(csv_ratings)[:1000]
+movies = pl.read_csv(csv_movies)
+user, movies = prep_pipeline(ratings, movies)
+
+
+engine = create_engine(f"postgresql+psycopg2://postgres:{os.getenv('POSTGRES_PASSWORD')}@localhost:5432/movie_recommendation")
+conn = engine.connect()
+pl.read_database('select * from data_storage.movies', connection=conn)
+
+def to_data_storage():
+    engine = create_engine(f"postgresql+psycopg2://postgres:{os.getenv('POSTGRES_PASSWORD')}@localhost:5432/movie_recommendation")
+    conn = engine.connect()
+    prvi = True
+
+for user, movies in data.take(1):
+    pl.DataFrame(user.numpy()).write_database('data_storage.user', conn, if_table_exists='replace' if prvi else 'append')
+    pl.DataFrame(movies.numpy()).write_database('data_storage.movies', conn, if_table_exists='replace' if prvi else 'append')
     
-    '''
-    y = tf.convert_to_tensor(df.select(pl.col('rating')).to_numpy(), dtype=tf.float16)
+pl.read_database('select * from data_storage.movies', connection=conn)
 
-    prva_user = df.columns.index('no genres listed')
-    poslednja_user = df.columns.index('Western')
-    ###prva kolona u X_user_ud je userid!!!, trebace za preporuke, za treniranje koristiti X_user
-    X_user = tf.convert_to_tensor(df.select(['userid'] + df.columns[prva_user : poslednja_user + 1]).to_numpy(), dtype=tf.float32)
-    X_movie_df = df.select(['year','avg_rating', '#ratings_film'] + [col for col in df.columns if col.endswith('_right')])
-    movie_num = tf.convert_to_tensor(X_movie_df.select(['#ratings_film', 'year', 'avg_rating']).to_numpy(), dtype=tf.float32)
-    movie_cat = tf.convert_to_tensor(X_movie_df.select(pl.all().exclude(['#ratings_film', 'year', 'avg_rating'])).to_numpy(), dtype=tf.float32)
-    # Standardizacija user i movie numeričkih
- 
-    return X_user, X_movie_scaled, y_scaled#, scalers
 
-def 
+
+def tf_dataset_to_sql(dataset, conn):
+    prvi = True
+    i = 0
+    for user_tensor, movies_tensor in dataset:
+        # konvertuj tensor u polars dataframe
+        df_user = pl.DataFrame(user_tensor.numpy())
+        df_movies = pl.DataFrame(movies_tensor.numpy())
+        i+=1
+        print(i)
+        # upis u bazu
+        
+        df_user.write_database('data_storage.user', conn, if_table_exists='replace' if prvi else 'append')
+        df_movies.write_database('data_storage.movies', conn, if_table_exists='replace' if prvi else 'append')
+        prvi = False
+        if i ==10:
+            break
+engine = create_engine(f"postgresql+psycopg2://postgres:{os.getenv('POSTGRES_PASSWORD')}@localhost:5432/movie_recommendation")
+conn = engine.connect()
+
+# Pozovi funkciju
+tf_dataset_to_sql(data, conn)
+
+conn.close()
+
+def batch_generator(ratings_path, movies_path, batch_size=1_500_000):
+    """
+    Pravi batch-eve iz CSV fajla sa ocenjivanjem filmova (ratings).
+    """
+    movies = pl.read_csv(movies_path)
+    offset = 0
+    #Lazy prebroji redove
+    total_rows = pl.scan_csv(ratings_path).select(pl.len()).collect()[0, 0]
+    while offset < total_rows:
+        batch = pl.read_csv(ratings_path).slice(offset, batch_size)
+        if batch.height == 0:
+            break
+        user_df, movies_df= prep_pipeline(batch, movies)
+        user_tensor = tf.convert_to_tensor(user_df.to_numpy(), dtype=tf.float64)
+        movies_tensor = tf.convert_to_tensor(movies_df.to_numpy(), dtype=tf.float64)
+        
+        yield (user_tensor, movies_tensor)
+        
+        offset += batch_size
+
+data = tf.data.Dataset.from_generator(lambda: batch_generator(ratings_path= csv_ratings, movies_path= csv_movies,batch_size= 1_000), output_signature= (tf.TensorSpec(shape=(None, 22), dtype=tf.float64, name = 'user'), tf.TensorSpec(shape=(None, 25), dtype=tf.float64, name = 'movie')))
+
+for i in data.take(3):
+    print(i)
+
+
+def data_storage(data):
+    engine = create_engine(f"postgresql+psycopg2://postgres:{os.getenv('POSTGRES_PASSWORD')}@localhost:5432/movie_recommendation")
+    prvi = True
+    i = 0
+    for u, m in tqdm(data):
+        conn = engine.connect()
+        pl.DataFrame(u.numpy()).write_database('data_storage.user', conn, if_table_exists='replace' if prvi else 'append')
+        pl.DataFrame(m.numpy()).write_database('data_storage.movies', conn, if_table_exists='replace' if prvi else 'append')
+        prvi = False
+        i+=1
+        print(i)
+data_storage(data)
+    
+pl.read_database('SELECT * FROM data_storage.user', connection=conn)
+
