@@ -7,21 +7,22 @@ from keras import layers
 from keras.saving import register_keras_serializable
 import joblib
 
-csv_ratings = "../ml-32m/ratings_short.csv"
+csv_ratings = "../ml-32m/ratings.csv"
 csv_movies = "../ml-32m/movies.csv"
 
+df = pl.read_csv(csv_ratings)
 
 user_kolone, movies_kolone = imena_kolona(csv_ratings, csv_movies)
 
-batch = 1000 #~32768
-
+batch = 2**16 #~65536
+4*batch
 
 data = tf.data.Dataset.from_generator(lambda: batch_generator(ratings_path= csv_ratings, movies_path= csv_movies,batch_size= batch, train = True), output_signature= ((tf.TensorSpec(shape=(None, 20), dtype=tf.float64, name = 'user'), tf.TensorSpec(shape=(None, 23), dtype=tf.float64, name = 'movie')), tf.TensorSpec(shape=(None,1), dtype=tf.float32)))
 
 
-train_size = 100_000 // batch
-dev_size = 250_000 // batch
-test_size = 250_000 // batch
+train_size = (10_000_000 // batch) +1 #10_027_008
+dev_size = (250_000 // batch) + 1 #262144
+test_size = (250_000 // batch) + 1 #262144
 
 data_train = data.take(train_size).prefetch(tf.data.AUTOTUNE) #ne stavlja se repeat zbog adapt (beskonacno ga racuna posto nema kraja datasetu)
 
@@ -30,13 +31,13 @@ norm_user = standardizacija(data_train.map(lambda x,y: x[0]))
 norm_movies = standardizacija(data_train.map(lambda x,y: x[1][:,:3])) # samo prve tri kolone su numericke (#ratings_film, year, avg rating, ostale su dummy)
 
 
-data_train = data_train.map(lambda x, y: ((norm_user(x[0]),tf.concat([tf.cast(norm_movies(x[1][:, :3]), tf.float32),tf.cast(x[1][:, 3:], tf.float32)], axis=1)),scale_y(y)))
+data_train = data_train.map(lambda x, y: ((norm_user(x[0]),tf.concat([tf.cast(norm_movies(x[1][:, :3]), tf.float32),tf.cast(x[1][:, 3:], tf.float32)], axis=1)),scale_y(y))).repeat().prefetch(tf.data.AUTOTUNE)
 
 # Ulazi
 user_input = tf.keras.Input(shape=(20,), name="user_input")
 movie_input = tf.keras.Input(shape=(23,), name="movie_input")
 
-slojevi = [128, 64]
+slojevi = [128,128, 64]
 embedding = 32
 
 u = user_input
@@ -69,17 +70,50 @@ data_dev = data.skip(train_size).take(dev_size)
 
 data_dev = data_dev.map(lambda x, y: ((norm_user(x[0]),tf.concat([tf.cast(norm_movies(x[1][:, :3]), tf.float32),tf.cast(x[1][:, 3:], tf.float32)], axis=1)),scale_y(y))).prefetch(tf.data.AUTOTUNE)
 
-data_test = data.skip(train_size).take(train_size + dev_size)
+
+history = model.fit(data_train, validation_data=data_dev, epochs=5, steps_per_epoch=train_size, validation_steps=dev_size)
 
 
-data_test = data_test.map(lambda x, y: ((norm_user(x[0]),tf.concat([tf.cast(norm_movies(x[1][:, :3]), tf.float32),tf.cast(x[1][:, 3:], tf.float32)], axis=1)),scale_y(y))).prefetch(tf.data.AUTOTUNE)
+model.save(f'model_128_128_64_32.keras')
+joblib.dump(history, 'histori_128_128_64_32.pkl')
+
+test_score = model.evaluate(data_test)
+
+model.summary()
+
+movies_net = tf.keras.Model(inputs=movie_input, outputs=movie_embedding)
+movies_net = movies_net.predict(X_movie)
+
+data_test = data.skip(train_size).take(test_size)
 
 
-history = model.fit(data_train, validation_data=data_dev, epochs=20, steps_per_epoch=train_size, validation_steps=dev_size)
+data_test = tf.data.Dataset.from_generator(lambda: batch_generator(ratings_path= csv_ratings, movies_path= csv_movies,batch_size= 100, train = False), output_signature= ((tf.TensorSpec(shape=(None, 22), dtype=tf.float64, name = 'user'), tf.TensorSpec(shape=(None, 25), dtype=tf.float64, name = 'movie')), tf.TensorSpec(shape=(None,3), dtype=tf.float32)))
+
+norm_user.mean
+norm_user.variance
+norm_movies.mean
+norm_movies.variance
+
+t = StandardizationLayer()
+t.set_weights(norm_user.mean)
+
+m[:,:5]
+(u,m), y = next(iter(data_test))
+data_test = data_test.map(lambda x, y: ((norm_user(x[0]),tf.concat([tf.cast(norm_movies(x[1][:, 2:5]), tf.float32),tf.cast(x[1][:, 3:], tf.float32)], axis=1)),scale_y(y))).repeat().prefetch(tf.data.AUTOTUNE)
 
 
-model.save(f'model_128_64_32.keras')
-joblib.dump(history, 'histori_128_64_32.pkl')
+m_net = model.movie_net
 
-proba = keras.models.load_model('model_128_128_64_64.keras')
+
+X_user_id, maska ,y_id = scale(df, user, movies_feat, user_id = 28)
+u_id = X_user_id[0,0]
+X_user_id = X_user_id[0:1,1:]  ##SVAKI RED JE ISTI, A PRVA KOL JE USER_ID, MORA 0:1 DA BI SHAPE BIO (1,-1)
+
+u_net = model.user_net
+u_embed = u_net.predict(X_user_id)
+print(u_embed.shape)
+
+pred = tf.linalg.matmul(u_embed, m_embed, transpose_b= True)
+pred_negledani = tf.boolean_mask(pred, ~maska, axis = 1)
+val, idx = tf.math.top_k(pred_negledani, k = 10)
 
