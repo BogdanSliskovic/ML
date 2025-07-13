@@ -11,25 +11,99 @@ model = keras.models.load_model("proba.keras", custom_objects={
     "MovieRecommender": MovieRecommender
 })
 
+raw_dataset = tf.data.TFRecordDataset('dataset.tfrecord')
+
+
 history = joblib.load('histori_128_128_64_32.pkl')
+norm_user = keras.models.load_model('norm_user.keras')
+norm_movies = keras.models.load_model('norm_movies.keras')
 hist = pl.DataFrame(history.history)
 
 test = pl.read_csv('../ml-32m/ratings_test.csv')
-data_test = tf.data.Dataset.from_generator(lambda: batch_generator(ratings_path= "../ml-32m/ratings_test.csv", movies_path= '../ml-32m/movies.csv',batch_size= 20, train = False), output_signature= ((tf.TensorSpec(shape=(None, 22), dtype=tf.float64, name = 'user'), tf.TensorSpec(shape=(None, 25), dtype=tf.float64, name = 'movie')), tf.TensorSpec(shape=(None,3), dtype=tf.float32)))
+movies = pl.read_csv('../ml-32m/movies.csv')
+data_test = tf.data.Dataset.from_generator(lambda: batch_generator(ratings_path= "../ml-32m/ratings_test.csv", movies_path= '../ml-32m/movies.csv',batch_size= 10000, train = False), output_signature= ((tf.TensorSpec(shape=(None, 22), dtype=tf.float64, name = 'user'), tf.TensorSpec(shape=(None, 25), dtype=tf.float64, name = 'movie')), tf.TensorSpec(shape=(None,3), dtype=tf.float32)))
+userId = 54488
+temp = test.filter(pl.col('userId') == userId)
+u,m, y = prep_pipeline(temp, movies)
+norm_user.variance.numpy()
+u[0, 2:] - norm_user.mean.numpy()
+temp.mean()['rating']
+st = (u[0, 2:].to_numpy() - norm_user.mean.numpy()) / np.sqrt(norm_user.variance)
+st[0,0] = -100
 
-data = data_test.take(2).prefetch(tf.data.AUTOTUNE) 
+model.user_net(st)
+model.movie_net
 
+m.filter(pl.col('moviId') == m.select(pl.col('movieId')).unique())
+m.is_duplicated()
+
+def spoji_users(df):
+    # df shape: (batch, 25)
+    df = tf.cast(df, tf.float32)
+    return tf.concat(
+        [df[:, :2], norm_user(df[:, 2:])],
+        axis=1
+    )
+
+def spoji_movies(df):
+    # df shape: (batch, 22)
+    df = tf.cast(df, tf.float32)
+    return tf.concat(
+        [df[:,:2], norm_movies(df[:, 2:5]), df[:, 5:]],
+        axis=1
+    )
+
+def spoji_labels(df):
+    # df shape: (batch, 3)
+    df = tf.cast(df, tf.float32)
+    return tf.concat(
+        [df[:, :2], scale_y(df[:, 2:])],
+        axis=1
+    )
+
+data_test = data_test.map(
+    lambda x, y: (
+        (spoji_users(x[0]), spoji_movies(x[1])),
+        spoji_labels(y)
+    )
+).prefetch(tf.data.AUTOTUNE)
 (u,m), y = next(iter(data_test))
-
-norm_user = standardizacija(data.map(lambda x,y: x[0][:,2:]))
-norm_user.mean
-norm_movies = standardizacija(data_test.map(lambda x,y: x[1][:,2:5])) # samo prve tri kolone su numericke (#ratings_film, year, avg rating, ostale su dummy)
+user = u
 
 
-data_train = data_train.map(lambda x, y: ((norm_user(x[0]),tf.concat([tf.cast(norm_movies(x[1][:, :3]), tf.float32),tf.cast(x[1][:, 3:], tf.float32)], axis=1)),scale_y(y))).repeat().prefetch(tf.data.AUTOTUNE)
+model.user_net.summary()
+(u,m), y = next(iter(data_test.map(uzmi_usera(54488))))
+
+tf.boolean_mask(u[:,2:], tf.equal(u[:,0], 54488))[0]
+tf.where(u[:,0] == 54488)
+t = u[u[:,0] == 54488]
+odgledani_filmovi = t[:,1]
+odgledani_filmovi
+model.user_net.predict(t[0,2:])
+model.user_net.predict(t[0:1,2:])
+t[0,2:]
+t[0:1,2:]
+tf.boolean_mask(u[:,0] == 54488)
+
+embed_m = model.movie_net.predict(data_test.map(lambda x,y: x[1][:,2:]))
+embed_m.shape
+suma = 0
+sum([i**2 for i in embed_m[100]])
+embed_m.shape
+
+userId = 54488
+def uzmi_usera(userId):
+    def fn(x,y):
+        user = x[0]
+        return tf.boolean_mask(user[:,2:], tf.equal(user[:,0], userId))[0:1]
+    return fn
+embed_u = model.user_net.predict(data_test.map(uzmi_usera(userId)))
+embed_u[5,:5]
+tf.repeat(embed_u[0:1], embed_m.shape[0], axis = 0)
 
 
-
+u
+t = data_test.map(lambda x,y: x[1][:,2:])
 plt.figure(figsize=(8,5))
 plt.plot(hist["loss"], label="Train Loss")
 plt.plot(hist["val_loss"], label="Validation Loss")
