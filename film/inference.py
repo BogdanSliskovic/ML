@@ -1,25 +1,46 @@
 from prep import *
-
+from model import *
 import tensorflow as tf
-from model import ColaborativeFiltering
 from tensorflow import keras
 import joblib
 import matplotlib.pyplot as plt
-ratings, movies = read_data_lake()
-user, movies, df = prep_pipeline(ratings, movies)
-model = keras.models.load_model('model_proba.keras')
-history = joblib.load('history_proba.pkl')
+import numpy as np
+model = keras.models.load_model("proba.keras", custom_objects={
+    "L2NormalizeLayer": L2NormalizeLayer,
+    "SqueezeLayer": SqueezeLayer,
+    "MovieRecommender": MovieRecommender
+})
 
-# pl.read_database(query='SELECT * FROM data_lake.ratings', connection=conn)
+history = joblib.load('histori_128_128_64_32.pkl')
+hist = pl.DataFrame(history.history)
 
-# engine = create_engine(f"postgresql+psycopg2://postgres:{os.getenv('POSTGRES_PASSWORD')}@localhost:5432/movie_recommendation")
-# conn = engine.connect()
+test = pl.read_csv('../ml-32m/ratings_test.csv')
+data_test = tf.data.Dataset.from_generator(lambda: batch_generator(ratings_path= "../ml-32m/ratings_test.csv", movies_path= '../ml-32m/movies.csv',batch_size= 20, train = False), output_signature= ((tf.TensorSpec(shape=(None, 22), dtype=tf.float64, name = 'user'), tf.TensorSpec(shape=(None, 25), dtype=tf.float64, name = 'movie')), tf.TensorSpec(shape=(None,3), dtype=tf.float32)))
+
+data = data_test.take(2).prefetch(tf.data.AUTOTUNE) 
+
+(u,m), y = next(iter(data_test))
+
+norm_user = standardizacija(data.map(lambda x,y: x[0][:,2:]))
+norm_user.mean
+norm_movies = standardizacija(data_test.map(lambda x,y: x[1][:,2:5])) # samo prve tri kolone su numericke (#ratings_film, year, avg rating, ostale su dummy)
+
+
+data_train = data_train.map(lambda x, y: ((norm_user(x[0]),tf.concat([tf.cast(norm_movies(x[1][:, :3]), tf.float32),tf.cast(x[1][:, 3:], tf.float32)], axis=1)),scale_y(y))).repeat().prefetch(tf.data.AUTOTUNE)
 
 
 
-
+plt.figure(figsize=(8,5))
+plt.plot(hist["loss"], label="Train Loss")
+plt.plot(hist["val_loss"], label="Validation Loss")
+plt.xlabel("Epoch")
+plt.ylabel("Loss")
+plt.legend()
+plt.grid(True)
+plt.show()
 
 m_net = model.movie_net
+
 m_embed = m_net.predict(X_movie)
 
 X_user_id, maska ,y_id = scale(df, user, movies_feat, user_id = 28)
@@ -33,6 +54,7 @@ print(u_embed.shape)
 pred = tf.linalg.matmul(u_embed, m_embed, transpose_b= True)
 pred_negledani = tf.boolean_mask(pred, ~maska, axis = 1)
 val, idx = tf.math.top_k(pred_negledani, k = 10)
+
 
 
 

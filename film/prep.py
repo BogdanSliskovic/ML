@@ -4,8 +4,6 @@ import tensorflow as tf
 from tqdm import tqdm 
 import os
 
-# ratings = pl.read_csv("../ml-32m/ratings.csv")[:1000]
-# movies = pl.read_csv("../ml-32m/movies.csv")
 def prep_pipeline(ratings, movies):
     '''
     Priprema za model
