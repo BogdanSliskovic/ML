@@ -1,6 +1,6 @@
 # Movie Recommendation System
 
-![Architecture](Train.drawio.png)
+![Architecture](Movie_reccomender.png)
 
 This project implements a scalable and efficient movie recommendation system using the MovieLens dataset containing 32 million movie ratings. It leverages **Polars** for fast data processing and **TensorFlow** with Keras for model training and inference.
 
