@@ -1,6 +1,5 @@
 import tensorflow as tf
 from tensorflow import keras
-import numpy as np
 from keras import layers
 from keras.saving import register_keras_serializable
 

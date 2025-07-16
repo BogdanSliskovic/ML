@@ -1,8 +1,5 @@
 import polars as pl
-from sqlalchemy import create_engine
 import tensorflow as tf
-from tqdm import tqdm 
-import os
 
 def prep_pipeline(ratings, movies):
     '''
