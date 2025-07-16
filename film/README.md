@@ -22,6 +22,8 @@ Data processing and feature engineering are implemented in [`prep.py`](./prep.py
   - **User DataFrame**: 22 columns including user and movie IDs plus average genre ratings.
   - **Movie DataFrame**: 25 columns including IDs, number of ratings, average rating, release year, and genre dummy variables.
 
+For training, the dataset was split such that 1 million samples were set aside for development (validation), 1 million for testing, and the remaining ~30 million for training, ensuring robust evaluation and generalization.
+
 These feature matrices serve as input to the model.
 
 ---
