@@ -18,45 +18,45 @@ hist = pl.DataFrame(history.history)
 
 test = pl.read_csv('../ml-32m/ratings_test.csv')
 movies = pl.read_csv('../ml-32m/movies.csv')
-data_test = tf.data.Dataset.from_generator(lambda: batch_generator(ratings_path= '../ml-32m/ratings_test.csv', movies_path= '../ml-32m/movies.csv',batch_size= 10000, train = False), output_signature= ((tf.TensorSpec(shape=(None, 22), dtype=tf.float64, name = 'user'), tf.TensorSpec(shape=(None, 25), dtype=tf.float64, name = 'movie')), tf.TensorSpec(shape=(None,3), dtype=tf.float32)))
-next(iter(data_test))
-model.evaluate(data_test)
+# data_test = tf.data.Dataset.from_generator(lambda: batch_generator(ratings_path= '../ml-32m/ratings_test.csv', movies_path= '../ml-32m/movies.csv',batch_size= 10000, train = False), output_signature= ((tf.TensorSpec(shape=(None, 22), dtype=tf.float64, name = 'user'), tf.TensorSpec(shape=(None, 25), dtype=tf.float64, name = 'movie')), tf.TensorSpec(shape=(None,3), dtype=tf.float32)))
+# next(iter(data_test))
+# model.evaluate(data_test)
 
-def spoji_users(df):
-    # df shape: (batch, 25)
-    df = tf.cast(df, tf.float32)
-    return tf.concat(
-        [df[:, :2], norm_user(df[:, 2:])],
-        axis=1
-    )
+# def spoji_users(df):
+#     # df shape: (batch, 25)
+#     df = tf.cast(df, tf.float32)
+#     return tf.concat(
+#         [df[:, :2], norm_user(df[:, 2:])],
+#         axis=1
+#     )
 
-def spoji_movies(df):
-    # df shape: (batch, 22)
-    df = tf.cast(df, tf.float32)
-    return tf.concat(
-        [df[:,:2], norm_movies(df[:, 2:5]), df[:, 5:]],
-        axis=1
-    )
+# def spoji_movies(df):
+#     # df shape: (batch, 22)
+#     df = tf.cast(df, tf.float32)
+#     return tf.concat(
+#         [df[:,:2], norm_movies(df[:, 2:5]), df[:, 5:]],
+#         axis=1
+#     )
 
-def spoji_labels(df):
-    # df shape: (batch, 3)
-    df = tf.cast(df, tf.float32)
-    return tf.concat(
-        [df[:, :2], scale_y(df[:, 2:])],
-        axis=1
-    )
+# def spoji_labels(df):
+#     # df shape: (batch, 3)
+#     df = tf.cast(df, tf.float32)
+#     return tf.concat(
+#         [df[:, :2], scale_y(df[:, 2:])],
+#         axis=1
+#     )
 
-data_test = data_test.map(
-    lambda x, y: (
-        (spoji_users(x[0]), spoji_movies(x[1])),
-        spoji_labels(y)
-    )
-).prefetch(tf.data.AUTOTUNE)
-(u,m), y = next(iter(data_test))
-user = u
-u.to_numpy()
+# data_test = data_test.map(
+#     lambda x, y: (
+#         (spoji_users(x[0]), spoji_movies(x[1])),
+#         spoji_labels(y)
+#     )
+# ).prefetch(tf.data.AUTOTUNE)
+# (u,m), y = next(iter(data_test))
+# user = u
+# u.to_numpy()
 
-model.evaluate(u, data_test)
+# model.evaluate(u, data_test)
 
 userId = 29499
 temp = test.filter(pl.col('userId') == userId)
