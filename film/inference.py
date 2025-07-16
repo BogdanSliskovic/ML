@@ -10,7 +10,9 @@ model = keras.models.load_model("model_128_128_64_32.keras", custom_objects={
     "SqueezeLayer": SqueezeLayer,
     "MovieRecommender": MovieRecommender
 })
-
+csv_movies = '../ml-32m/movies.csv'
+csv_ratings = '../ml-32m/ratings.csv'
+user_kolone, movies_kolone = imena_kolona(csv_ratings, csv_movies)
 history = joblib.load('histori_128_128_64_32.pkl')
 norm_user = keras.models.load_model('user_scaler.keras')
 norm_movies = keras.models.load_model('movies_scaler.keras')
@@ -18,57 +20,98 @@ hist = pl.DataFrame(history.history)
 
 test = pl.read_csv('../ml-32m/ratings_test.csv')
 movies = pl.read_csv('../ml-32m/movies.csv')
+data_train = tf.data.Dataset.from_generator(lambda: batch_generator(ratings_path= '../ml-32m/ratings_train.csv', movies_path= csv_movies,batch_size= 2**16, train = False),
+    output_signature= ((tf.TensorSpec(shape=(None, 22), dtype=tf.float64, name = 'user'), tf.TensorSpec(shape=(None, 25),
+    dtype=tf.float64, name = 'movie')), tf.TensorSpec(shape=(None,3), dtype=tf.float32))).prefetch(tf.data.AUTOTUNE)
+next(iter(data_train))
+i = 0
+
+
+#PROLAZI KROZ CEO TRAIN DATASET I PRAVI MOVIE MATRICU SA PRIMARY KLJUCEM MOVIEID (INACE JE (USERID,MOVIEID) PA IMA 31M PODATAKA, OVAKO IMA 85 HILJADA RAZLICITIH FILMOVA PA JE 85000X25 UMESTO 31MX25
+# for (u,m),y in data_train:
+#     if i == 0:
+#         X_movies = pl.DataFrame(m.numpy(),schema= movies_kolone).with_columns(
+#             pl.col("movieId").cast(pl.Int64))
+#     else:
+#         df = pl.DataFrame(m.numpy(), schema=movies_kolone).with_columns(pl.col("movieId").cast(pl.Int64))
+#         X_movies = pl.concat([X_movies, df])
+#         X_movies = X_movies.unique(subset="movieId", keep="first")
+#     print(i)
+#     i +=1
+#     print(X_movies.shape)
+#     if X_movies.height == movies.height:
+#         break
+# X_movies.write_csv('../ml-32m/X_movies.csv')
+X_movies_id = pl.read_csv('../ml-32m/X_movies.csv')
+def spoji_users(df):
+    # df shape: (batch, 25)
+    df = tf.cast(df, tf.float32)
+    return tf.concat(
+        [df[:, :2], norm_user(df[:, 2:])],
+        axis=1
+    )
+
+def spoji_movies(df):
+    # df shape: (batch, 22)
+    df = tf.cast(df, tf.float32)
+    return tf.concat(
+        [df[:,:2], norm_movies(df[:, 2:5]), df[:, 5:]],
+        axis=1
+    )
+
+def spoji_labels(df):
+    # df shape: (batch, 3)
+    df = tf.cast(df, tf.float32)
+    return tf.concat(
+        [df[:, :2], scale_y(df[:, 2:])],
+        axis=1
+    )
+
+data_train = data_train.map(
+    lambda x, y: (
+        (spoji_users(x[0]), spoji_movies(x[1])),
+        spoji_labels(y)
+    )
+).prefetch(tf.data.AUTOTUNE)
+
+# data_train = data_train.map(lambda x, y: ((norm_user(x[0]),tf.concat([tf.cast(norm_movies(x[1][:, :3]), tf.float32),tf.cast(x[1][:, 3:], tf.float32)], axis=1)),scale_y(y))).repeat().prefetch(tf.data.AUTOTUNE)
+
 # data_test = tf.data.Dataset.from_generator(lambda: batch_generator(ratings_path= '../ml-32m/ratings_test.csv', movies_path= '../ml-32m/movies.csv',batch_size= 10000, train = False), output_signature= ((tf.TensorSpec(shape=(None, 22), dtype=tf.float64, name = 'user'), tf.TensorSpec(shape=(None, 25), dtype=tf.float64, name = 'movie')), tf.TensorSpec(shape=(None,3), dtype=tf.float32)))
 # next(iter(data_test))
 # model.evaluate(data_test)
 
-# def spoji_users(df):
-#     # df shape: (batch, 25)
-#     df = tf.cast(df, tf.float32)
-#     return tf.concat(
-#         [df[:, :2], norm_user(df[:, 2:])],
-#         axis=1
-#     )
-
-# def spoji_movies(df):
-#     # df shape: (batch, 22)
-#     df = tf.cast(df, tf.float32)
-#     return tf.concat(
-#         [df[:,:2], norm_movies(df[:, 2:5]), df[:, 5:]],
-#         axis=1
-#     )
-
-# def spoji_labels(df):
-#     # df shape: (batch, 3)
-#     df = tf.cast(df, tf.float32)
-#     return tf.concat(
-#         [df[:, :2], scale_y(df[:, 2:])],
-#         axis=1
-#     )
-
-# data_test = data_test.map(
-#     lambda x, y: (
-#         (spoji_users(x[0]), spoji_movies(x[1])),
-#         spoji_labels(y)
-#     )
-# ).prefetch(tf.data.AUTOTUNE)
-# (u,m), y = next(iter(data_test))
-# user = u
-# u.to_numpy()
-
-# model.evaluate(u, data_test)
 
 userId = 29499
 temp = test.filter(pl.col('userId') == userId)
+gledani = temp['movieId'].to_list()
 u,m, y = prep_pipeline(temp, movies)
-norm_user.variance.numpy()
-u[:, 2:].to_numpy() - norm_user.mean.numpy()
-temp.mean()['rating']
+
 st = (u[:, 2:].to_numpy() - norm_user.mean.numpy()) / np.sqrt(norm_user.variance)
 st[:,0] = 0
+norm_movies.mean.numpy()
 
-model.user_net(st)
-model.movie_net
+#IZBACUJEM ID KOLONE
+X_movies = X_movies_id[:,2:]
+norm_movies.mean.numpy()
+norm_movies.variance.numpy()
+
+num_movies = X_movies[:,:3]
+st_movies = (num_movies.to_numpy() - norm_movies.mean.numpy()) / np.sqrt(norm_movies.variance)
+st_movies = pl.DataFrame(st_movies, schema=X_movies.columns[:3])
+X_movies = pl.concat([st_movies, X_movies[:,3:]], how="horizontal")
+embed_u = model.user_net.predict(st)
+embed_m = model.movie_net.predict(X_movies.to_numpy())
+embed_m[0]
+embed_u = tf.repeat(embed_u[0:1], embed_m.shape[0], axis = 0)
+embed_u.shape, embed_m.shape
+
+dot = tf.reduce_sum(embed_u * embed_m, axis=1)
+temp['rating']
+tf.math.top_k(dot, k=10)[1]
+X_movies_id[10158]
+tf.reduce_max(dot)
+
+
 
 m.filter(pl.col('moviId') == m.select(pl.col('movieId')).unique())
 m.is_duplicated()

@@ -7,7 +7,7 @@ def prep_pipeline(ratings, movies):
     '''
     #PROSECAN BROJ OCENA PO FILMU
     num_ratings = ratings.group_by('movieId').agg(pl.len().alias('#ratings_film'))
-    user = ratings.join(num_ratings, on = 'movieId', how = 'left').sort(['movieId', 'userId'])
+    user = ratings.join(num_ratings, on = 'movieId', how = 'left')
     movies, unique_genres = get_genres(movies, prep = True)
     #LAZY!
     user = user.lazy()
