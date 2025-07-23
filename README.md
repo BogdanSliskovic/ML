@@ -38,9 +38,6 @@ Manual implementation of a flexible multilayer neural network using only NumPy. 
 Image classification using fully connected neural networks built with TensorFlow and Keras. Applied on the Fashion MNIST dataset with exploration of activation functions, dropout regularization, and tuning hyperparameters.  
 Good foundation for future CNN implementation.
 
-### [Titanic Modeling](./Titanik)
-Comprehensive end-to-end modeling on the Titanic dataset with scikit-learn. Includes feature engineering (`deck-class`, family size), missing value imputation via KNN, model tuning with `RandomizedSearchCV`, and dimensionality reduction via PCA.  
-Also explores unsupervised learning by adding `KMeans` and `DBSCAN` cluster features into the modeling pipeline.
 
 ### [Credit Risk Modeling](./Kredit)
 Binary classification project using a credit dataset from OpenML. Models include Logistic Regression, SVM, and Random Forest, each with a tailored preprocessing pipeline.  
