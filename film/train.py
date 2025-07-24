@@ -16,15 +16,18 @@ batch = 2**16 #65536
 
 csv_ratings = "../ml-32m/ratings.csv"
 csv_movies = "../ml-32m/movies.csv"
+min(test['rating'])
+
+
 
 
 #Podela na train, dev i test u razlicite .csv fajlove
 za_test = (1_000_000 // batch + 1) * batch
 
 df = pl.read_csv(csv_ratings)
-#promesaj df
-dev = pl.read_csv(csv_ratings).sample(za_test, shuffle= True, seed = 42)
-test = pl.read_csv(csv_ratings).sample(za_test, shuffle= True, seed = 42)
+
+dev = df.sample(za_test, shuffle= True, seed = 42)
+test = df.sample(za_test, shuffle= True, seed = 420)
 
 dev_test = pl.concat([dev, test])
 
@@ -38,7 +41,6 @@ for skup in ['train', 'dev', 'test']:
     globals()[skup+ '_path'] = path
 
 
-
 data_train = tf.data.Dataset.from_generator(lambda: batch_generator(ratings_path= train_path, movies_path= csv_movies,batch_size= batch, train = True),
     output_signature= ((tf.TensorSpec(shape=(None, 20), dtype=tf.float64, name = 'user'), tf.TensorSpec(shape=(None, 23),
     dtype=tf.float64, name = 'movie')), tf.TensorSpec(shape=(None,1), dtype=tf.float32))).prefetch(tf.data.AUTOTUNE)
@@ -49,10 +51,10 @@ data_dev = tf.data.Dataset.from_generator(lambda: batch_generator(ratings_path= 
 
 user_kolone, movies_kolone = imena_kolona(csv_ratings, csv_movies)
 
-# norm_user = standardizacija(data_train.map(lambda x,y: x[0]))
-# norm_movies = standardizacija(data_train.map(lambda x,y: x[1][:,:3])) # samo prve tri kolone su numericke (#ratings_film, year, avg rating, ostale su dummy)
-# keras.models.save_model(norm_user, 'user_scaler.keras')
-# keras.models.save_model(norm_movies, 'movies_scaler.keras')
+norm_user = standardizacija(data_train.map(lambda x,y: x[0]))
+norm_movies = standardizacija(data_train.map(lambda x,y: x[1][:,:3])) # samo prve tri kolone su numericke (#ratings_film, year, avg rating, ostale su dummy)
+keras.models.save_model(norm_user, 'user_scaler.keras')
+keras.models.save_model(norm_movies, 'movies_scaler.keras')
 norm_user = keras.models.load_model('user_scaler.keras')
 norm_movies = keras.models.load_model('movies_scaler.keras')
 

@@ -40,7 +40,7 @@ def prep_pipeline(ratings, movies):
     y = ratings.collect()
     
     return X_user, X_movie, y
-# ratings.collect()
+
 
 def get_genres(movies, prep = False):
     movies = movies.with_columns(pl.col("genres").str.split("|"))
@@ -51,7 +51,7 @@ def get_genres(movies, prep = False):
     else:
       return unique_genres
 
-def batch_generator(ratings_path, movies_path, batch_size=1_500_000, train = False):
+def batch_generator(ratings_path, movies_path, batch_size, train = False):
     """
     Pravi batch-eve iz CSV fajla sa ocenjivanjem filmova (ratings).
     """
@@ -74,7 +74,7 @@ def batch_generator(ratings_path, movies_path, batch_size=1_500_000, train = Fal
             yield (user_tensor, movies_tensor), y
         
         offset += batch_size
-        
+
 def imena_kolona(ratings_path, movies_path):
     ratings = pl.read_csv(ratings_path).slice(0,10)
     movies = pl.read_csv(movies_path)

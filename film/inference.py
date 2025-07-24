@@ -5,11 +5,18 @@ from tensorflow import keras
 import joblib
 import matplotlib.pyplot as plt
 import numpy as np
+from sklearn.metrics import mean_absolute_error, mean_squared_error
 model = keras.models.load_model("model_128_128_64_32.keras", custom_objects={
     "L2NormalizeLayer": L2NormalizeLayer,
     "SqueezeLayer": SqueezeLayer,
     "MovieRecommender": MovieRecommender
 })
+norm_user = keras.models.load_model('user_scaler.keras')
+norm_movies = keras.models.load_model('movies_scaler.keras')
+model.summary()
+model.user_net.summary()
+model.movie_net.summary()
+
 csv_movies = '../ml-32m/movies.csv'
 csv_ratings = '../ml-32m/ratings.csv'
 user_kolone, movies_kolone = imena_kolona(csv_ratings, csv_movies)
@@ -18,8 +25,30 @@ norm_user = keras.models.load_model('user_scaler.keras')
 norm_movies = keras.models.load_model('movies_scaler.keras')
 hist = pl.DataFrame(history.history)
 
-test = pl.read_csv('../ml-32m/ratings_test.csv')
+ratings_test = pl.read_csv('../ml-32m/ratings_test.csv')
 movies = pl.read_csv('../ml-32m/movies.csv')
+user, movies, y  = prep_pipeline(ratings_test, movies)
+
+(user[:,2:],movies[:,2:]), y
+model.evaluate((user[:,2:],movies[:,2:]), y[:,2:3])
+
+movies = pl.read_csv('../ml-32m/movies.csv')
+
+data_test = tf.data.Dataset.from_generator(lambda: batch_generator(ratings_path= '../ml-32m/ratings_test.csv', movies_path= csv_movies,batch_size= 2**16, train = True),
+    output_signature= ((tf.TensorSpec(shape=(None, 20), dtype=tf.float64, name = 'user'), tf.TensorSpec(shape=(None, 23),
+    dtype=tf.float64, name = 'movie')), tf.TensorSpec(shape=(None,1), dtype=tf.float32))).prefetch(tf.data.AUTOTUNE)
+next(iter(data_test))
+
+data_test = data_test.map(lambda x, y: ((norm_user(x[0]),tf.concat([tf.cast(norm_movies(x[1][:, :3]), tf.float32),tf.cast(x[1][:, 3:], tf.float32)], axis=1)),scale_y(y))).prefetch(tf.data.AUTOTUNE)
+
+y_test = scale_y(y[:,2].to_numpy())
+
+y_test_pred = model.predict(data_test)
+
+mean_absolute_error(y_test, y_test_pred)
+mean_squared_error(y_test, y_test_pred)
+
+data_test.map(lambda x,y: x[0])
 data_train = tf.data.Dataset.from_generator(lambda: batch_generator(ratings_path= '../ml-32m/ratings_train.csv', movies_path= csv_movies,batch_size= 2**16, train = False),
     output_signature= ((tf.TensorSpec(shape=(None, 22), dtype=tf.float64, name = 'user'), tf.TensorSpec(shape=(None, 25),
     dtype=tf.float64, name = 'movie')), tf.TensorSpec(shape=(None,3), dtype=tf.float32))).prefetch(tf.data.AUTOTUNE)
@@ -74,11 +103,11 @@ data_train = data_train.map(
     )
 ).prefetch(tf.data.AUTOTUNE)
 
-# data_train = data_train.map(lambda x, y: ((norm_user(x[0]),tf.concat([tf.cast(norm_movies(x[1][:, :3]), tf.float32),tf.cast(x[1][:, 3:], tf.float32)], axis=1)),scale_y(y))).repeat().prefetch(tf.data.AUTOTUNE)
+data_train = data_train.map(lambda x, y: ((norm_user(x[0]),tf.concat([tf.cast(norm_movies(x[1][:, :3]), tf.float32),tf.cast(x[1][:, 3:], tf.float32)], axis=1)),scale_y(y))).repeat().prefetch(tf.data.AUTOTUNE)
 
-# data_test = tf.data.Dataset.from_generator(lambda: batch_generator(ratings_path= '../ml-32m/ratings_test.csv', movies_path= '../ml-32m/movies.csv',batch_size= 10000, train = False), output_signature= ((tf.TensorSpec(shape=(None, 22), dtype=tf.float64, name = 'user'), tf.TensorSpec(shape=(None, 25), dtype=tf.float64, name = 'movie')), tf.TensorSpec(shape=(None,3), dtype=tf.float32)))
-# next(iter(data_test))
-# model.evaluate(data_test)
+data_test = tf.data.Dataset.from_generator(lambda: batch_generator(ratings_path= '../ml-32m/ratings_test.csv', movies_path= '../ml-32m/movies.csv',batch_size= 10000, train = False), output_signature= ((tf.TensorSpec(shape=(None, 22), dtype=tf.float64, name = 'user'), tf.TensorSpec(shape=(None, 25), dtype=tf.float64, name = 'movie')), tf.TensorSpec(shape=(None,3), dtype=tf.float32)))
+next(iter(data_test))
+model.evaluate(data_test)
 
 
 userId = 29499
@@ -150,6 +179,8 @@ tf.repeat(embed_u[0:1], embed_m.shape[0], axis = 0)
 
 u
 t = data_test.map(lambda x,y: x[1][:,2:])
+hist = pl.DataFrame(history.history)
+plt.style.use('ggplot')
 plt.figure(figsize=(8,5))
 plt.plot(hist["loss"], label="Train Loss")
 plt.plot(hist["val_loss"], label="Validation Loss")
